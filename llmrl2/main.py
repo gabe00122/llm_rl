@@ -28,10 +28,11 @@ def load_param_dict(file_path):
 
     with safe_open(file_path, framework="np") as f:
         for key in track(f.keys()):
-            print(key)
             key_path = key.split('.')
             value = f.get_tensor(key)
             put_path(params, key_path, value)
+
+            print(f"{key}, {value.shape}")
     
     return params
 
