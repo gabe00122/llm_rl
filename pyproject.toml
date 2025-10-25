@@ -1,0 +1,28 @@
+[project]
+name = "llmrl2"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "flax>=0.12.0",
+    "jax[cuda12]>=0.8.0",
+    "jinja2>=3.1.6",
+    "ml-dtypes>=0.5.3",
+    "rich>=14.2.0",
+    "safetensors>=0.6.2",
+    "tensorflow-probability>=0.25.0",
+    "transformers>=4.57.1",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+# look for packages in the project root …
+where = ["."]
+# … but only accept the real python package
+include = ["llmrl2**"]
+# ignore non-python top-level folders that confused the auto-discovery
+exclude = ["config*", "videos*"]
