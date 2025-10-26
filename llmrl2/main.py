@@ -1,40 +1,13 @@
-from safetensors import safe_open
-from rich.progress import track
-import ml_dtypes
-# from transformers import AutoTokenizer, AutoModelForCausalLM
 from jax import numpy as jnp
 import jax
-import numpy as np
 from flax import nnx
 
 from llmrl2.config import load_config
 from llmrl2.model import Qwen3
 from llmrl2.util import load_tokenizer
+from llmrl2.checkpoint import load_param_dict
 
 PAD_ID = 151643
-
-def put_path(data, p: list[str], value):
-    first, *rest = p
-
-    if len(rest) == 0:
-        data[first] = value
-    else:
-        data = data.setdefault(first, {})
-        put_path(data, rest, value)
-
-
-def load_param_dict(file_path):
-    params = {}
-
-    with safe_open(file_path, framework="np") as f:
-        for key in track(f.keys()):
-            key_path = key.split('.')
-            value = f.get_tensor(key)
-            put_path(params, key_path, value)
-
-            print(f"{key}, {value.shape}")
-    
-    return params
 
 
 def encode_input(tokenizer, texts, pad_id: int = PAD_ID):
