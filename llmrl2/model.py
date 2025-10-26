@@ -117,8 +117,8 @@ class AttentionLayer(nnx.Module):
         key = self.key_norm(key)
         query = self.query_norm(query)
 
-        # key = apply_rotary_embedding(key, sin, cos)
-        # query = apply_rotary_embedding(query, sin, cos)
+        key = apply_rotary_embedding(key, sin, cos)
+        query = apply_rotary_embedding(query, sin, cos)
 
         x = jax.nn.dot_product_attention(
             query,
