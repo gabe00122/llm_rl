@@ -265,9 +265,9 @@ class Qwen3(nnx.Module):
         
         x = self.final_norm(x)
         logits = self.lm_head(x)
-        probs = tfd.Categorical(logits=logits)
+        # probs = tfd.Categorical(logits=logits)
 
-        return probs
+        return logits
 
         # if carry is not None:
         #     out_carry = []

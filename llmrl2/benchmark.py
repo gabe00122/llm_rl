@@ -99,11 +99,12 @@ def _make_tokens(config: Config, batch: int, seq: int, seed: int) -> jax.Array:
     return tokens
 
 
-def _block_forward(model, tokens: jax.Array) -> None:
-    @nnx.jit
-    def _apply(model, x):
-        return model(x)
+@nnx.jit
+def _apply(model, x):
+    return model(x)
 
+
+def _block_forward(model, tokens: jax.Array) -> None:
     logits = _apply(model, tokens)
     jax.block_until_ready(logits)
 
