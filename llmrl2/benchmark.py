@@ -10,7 +10,7 @@ from flax import nnx
 from rich.console import Console
 from rich.table import Table
 
-from llmrl2.checkpoint import load_param_dict
+from llmrl2.checkpoint import load_param_dict, load_safetensors
 from llmrl2.config import load_config, Config
 from llmrl2.model import Qwen3
 
@@ -84,7 +84,7 @@ def _parse_args() -> BenchmarkConfig:
 
 def _prepare_model(cfg: BenchmarkConfig) -> tuple[Qwen3, Config]:
     config = load_config(f"{cfg.model_path}/config.json")
-    params = load_param_dict(f"{cfg.model_path}/model.safetensors")
+    params = load_safetensors(cfg.model_path)
     model = Qwen3(config, rngs=nnx.Rngs(cfg.seed))
     model.load_params(params)
     del params
