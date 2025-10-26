@@ -99,8 +99,12 @@ def _make_tokens(config: Config, batch: int, seq: int, seed: int) -> jax.Array:
     return tokens
 
 
-def _block_forward(fn, tokens: jax.Array) -> None:
-    logits = fn(tokens).logits_parameter()
+def _block_forward(model, tokens: jax.Array) -> None:
+    @nnx.jit
+    def _apply(model, x):
+        return model(x)
+
+    logits = _apply(model, tokens)
     jax.block_until_ready(logits)
 
 
@@ -136,7 +140,7 @@ def benchmark_shape(
 
 def run_benchmark(cfg: BenchmarkConfig) -> None:
     model, config = _prepare_model(cfg)
-    compiled = nnx.jit(model)
+    compiled = model
 
     table = Table(title="Qwen3 JAX Benchmark")
     table.add_column("Batch", justify="right")
