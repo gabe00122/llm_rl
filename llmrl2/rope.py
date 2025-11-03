@@ -34,8 +34,6 @@ def generate_pos_embeddings(
         output_sin: a float32 Tensor with shape [length, features // 2]
         output_cos: a float32 Tensor with shape [length, features // 2]
     """
-
-    print(positions.shape)
     
     # Forked from: flaxformer/components/embedding.py;l=592
     fraction = jnp.arange(0, features, 2, dtype=jnp.float32) / features

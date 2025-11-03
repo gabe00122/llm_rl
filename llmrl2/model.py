@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, NamedTuple
 import jax
 from jax import numpy as jnp
 from flax import nnx
@@ -57,9 +57,18 @@ class MlpLayer(nnx.Module):
         return out
     
 
+class KVCache(NamedTuple):
+    key: jax.Array
+    value: jax.Array
+    length: jax.Array
+    
+
 class AttentionLayer(nnx.Module):
     def __init__(self, config: Config, *, rngs: nnx.Rngs) -> None:
         super().__init__()
+
+        self._num_kv_heads = config.kv_heads
+        self._head_dim = config.head_dim
 
         self.key_proj = nnx.LinearGeneral(
             in_features=config.embed,
@@ -109,7 +118,25 @@ class AttentionLayer(nnx.Module):
             rngs=rngs,
         )
 
-    def __call__(self, inputs, sin, cos) -> Any:
+    def initialize_carry(self, batch_size: int, seq_length: int):
+        shape = (batch_size, seq_length, self._num_kv_heads, self._head_dim)
+        key = jnp.zeros(shape, dtype=jnp.bfloat16)
+        value = jnp.zeros(shape, dtype=jnp.bfloat16)
+        lengths = jnp.zeros((batch_size,), dtype=jnp.int32)
+
+        return KVCache(key, value, lengths)
+    
+    def _update_carry(self, carry: KVCache, key: jax.Array, value: jax.Array):
+        batch_idx = jnp.arange(carry.length.shape[0], dtype=jnp.int32)
+        batch_idx = batch_idx[:, None]
+
+        key = carry.key.at[batch_idx, carry.length].set(key)
+        value = carry.value.at[batch_idx, carry.length].set(value)
+        length = carry.length + 1
+
+        return KVCache(key, value, length)
+
+    def __call__(self, inputs: jax.Array, sin: jax.Array, cos: jax.Array, carry: KVCache | None = None) -> tuple[jax.Array, KVCache | None]:
         key = self.key_proj(inputs)
         value = self.value_proj(inputs)
         query = self.query_proj(inputs)
@@ -120,16 +147,27 @@ class AttentionLayer(nnx.Module):
         key = apply_rotary_embedding(key, sin, cos)
         query = apply_rotary_embedding(query, sin, cos)
 
-        x = jax.nn.dot_product_attention(
-            query,
-            key,
-            value,
-            is_causal=True,
-            implementation="cudnn",
-        )
+        if carry is not None:
+            carry = self._update_carry(carry, key, value)
+
+            x = jax.nn.dot_product_attention(
+                query,
+                carry.key,
+                carry.value,
+                key_value_seq_lengths=carry.length,
+                implementation="cudnn",
+            )
+        else:
+            x = jax.nn.dot_product_attention(
+                query,
+                key,
+                value,
+                is_causal=True,
+                implementation="cudnn",
+            )
 
         out = self.out(x)
-        return out
+        return out, carry
 
     def load_params(self, params):
         k_proj = params["k_proj"]["weight"].T.reshape(self.key_proj.kernel.value.shape)
@@ -172,16 +210,19 @@ class Qwen3Layer(nnx.Module):
             rngs=rngs,
         )
 
-    def __call__(self, x, sin, cos) -> Any:
-        attn_in = self.attn_pre_norm(x)
-        attn_out = self.attn(attn_in, sin, cos)
-        x = x + attn_out
+    def __call__(self, inputs: jax.Array, sin: jax.Array, cos: jax.Array, carry: KVCache | None = None) -> tuple[jax.Array, KVCache | None]:
+        attn_in = self.attn_pre_norm(inputs)
+        attn_out, carry = self.attn(attn_in, sin, cos, carry)
+        x = inputs + attn_out
 
         ff_in = self.attn_post_norm(x)
         ff_out = self.mlp(ff_in)
         x = x + ff_out
 
-        return x, None
+        return x, carry
+    
+    def initialize_carry(self, batch_size: int, seq_length: int):
+        return self.attn.initialize_carry(batch_size, seq_length)
 
     def load_params(self, params):
         _load_param(self.attn_pre_norm.scale, params["input_layernorm"]["weight"])
@@ -229,8 +270,6 @@ class Qwen3(nnx.Module):
             params['model']['embed_tokens']['weight'],
             device=self.embeddings.embedding.value.device
         )
-        print(embed_params.shape)
-        print(self.embeddings.embedding.value.shape)
         assert embed_params.shape == self.embeddings.embedding.value.shape
 
         self.embeddings.embedding.value = embed_params
@@ -242,22 +281,19 @@ class Qwen3(nnx.Module):
         _load_param(self.final_norm.scale, params["model"]["norm"]["weight"])
         _load_param(self.lm_head.kernel, params["lm_head"]["weight"].T)
 
-    def initialize_carry(self, batch_size: int, rngs):
-        return tuple(layer.initialize_carry(batch_size, rngs) for layer in self.layers)
-
     def __call__(
-        self, tokens: jax.Array, carry=None
-    ): # -> tuple[jax.Array, tfd.Distribution, tuple[KVCache, ...] | None]:
+        self, tokens: jax.Array, positions: jax.Array, carry: tuple[KVCache, ...] | None=None
+    ) -> tuple[jax.Array, tuple[KVCache, ...] | None]:
         x = self.embeddings(tokens)
 
-        positions = jnp.repeat(jnp.arange(tokens.shape[1])[None, :], tokens.shape[0], axis=0)
+        # positions = jnp.repeat(jnp.arange(tokens.shape[1])[None, :], tokens.shape[0], axis=0)
         sin, cos = generate_pos_embeddings(positions, self._head_dim, self._rope_theta)  # [B, T, head_dim]
 
         if carry is not None:
             out_carry = []
-            for layer, _carry in zip(self.layers, carry):
-                x, _carry = layer(x, _carry)
-                out_carry.append(_carry)
+            for layer, layer_carry_in in zip(self.layers, carry):
+                x, layer_carry_out = layer(x, sin, cos, layer_carry_in)
+                out_carry.append(layer_carry_out)
             carry = tuple(out_carry)
         else:
             for layer in self.layers:
@@ -265,26 +301,8 @@ class Qwen3(nnx.Module):
         
         x = self.final_norm(x)
         logits = self.lm_head(x)
-        # probs = tfd.Categorical(logits=logits)
 
-        return logits
+        return logits, carry
 
-        # if carry is not None:
-        #     out_carry = []
-        #     for layer, _carry in zip(self.layers, carry):
-        #         x, _carry = layer(x, ts.time, _carry)
-        #         out_carry.append(_carry)
-        #     carry = tuple(out_carry)
-        # else:
-        #     for layer in self.layers:
-        #         x, _ = layer(x, ts.time)
-
-        # x = self.output_norm(x)
-
-        # action_logits = self.action_embedder.decode(x)
-
-        # action_logits = action_logits.astype(jnp.float32)
-
-        # policy = tfd.Categorical(logits=action_logits)
-
-        # return policy, carry
+    def initialize_carry(self, batch_size: int, seq_length: int):
+        return tuple(layer.initialize_carry(batch_size, seq_length) for layer in self.layers)

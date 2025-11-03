@@ -104,7 +104,9 @@ def _apply(model, x):
     return model(x)
 
 
-def _block_forward(model, tokens: jax.Array) -> None:
+def _block_forward(model: Qwen3, tokens: jax.Array) -> None:
+    kv_cache = model.initialize_carry()
+
     logits = _apply(model, tokens)
     jax.block_until_ready(logits)
 
