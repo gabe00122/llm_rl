@@ -1,5 +1,5 @@
 [project]
-name = "llmrl2"
+name = "llmrl"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -23,6 +23,6 @@ build-backend = "setuptools.build_meta"
 # look for packages in the project root …
 where = ["."]
 # … but only accept the real python package
-include = ["llmrl2**"]
+include = ["llmrl**"]
 # ignore non-python top-level folders that confused the auto-discovery
 exclude = ["config*", "videos*"]
