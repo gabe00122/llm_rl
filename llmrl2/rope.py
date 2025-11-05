@@ -53,6 +53,7 @@ def generate_pos_embeddings(
 
 def apply_rotary_embedding(x: jax.Array, sin: jax.Array, cos: jax.Array) -> jax.Array:
     x = jnp.permute_dims(x, (0, 2, 1, 3))
+    x = x.astype(jnp.float32)
 
     assert x.ndim == 4 and sin.ndim == 3 and cos.ndim == 3
     x1, x2 = x[..., :x.shape[-1] // 2], x[..., x.shape[-1] // 2:]

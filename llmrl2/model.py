@@ -4,8 +4,6 @@ from jax import numpy as jnp
 from flax import nnx
 from llmrl2.config import Config
 
-import tensorflow_probability.substrates.jax.distributions as tfd
-
 from llmrl2.rope import apply_rotary_embedding, generate_pos_embeddings
 
 
@@ -127,11 +125,13 @@ class AttentionLayer(nnx.Module):
         return KVCache(key, value, lengths)
     
     def _update_carry(self, carry: KVCache, key: jax.Array, value: jax.Array):
-        batch_idx = jnp.arange(carry.length.shape[0], dtype=jnp.int32)
-        batch_idx = batch_idx[:, None]
+        # batch_idx = jnp.arange(carry.length.shape[0], dtype=jnp.int32)
+        # batch_idx = batch_idx[:, None]
 
-        key = carry.key.at[batch_idx, carry.length].set(key)
-        value = carry.value.at[batch_idx, carry.length].set(value)
+        pos = carry.length[0]
+
+        key = jax.lax.dynamic_update_slice(carry.key, key, (0, pos, 0, 0))
+        value = jax.lax.dynamic_update_slice(carry.value, value, (0, pos, 0, 0))
         length = carry.length + 1
 
         return KVCache(key, value, length)
@@ -261,9 +261,9 @@ class Qwen3(nnx.Module):
             param_dtype=jnp.bfloat16,
             rngs=rngs,
         )
-        self.lm_head = nnx.Linear(
-            config.embed, config.vocab_size, dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, rngs=rngs
-        )
+        # self.lm_head = nnx.Linear(
+        #     config.embed, config.vocab_size, dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, rngs=rngs
+        # )
         
     def load_params(self, params: dict[str, Any]):
         embed_params = jnp.asarray(
@@ -279,7 +279,9 @@ class Qwen3(nnx.Module):
             layer.load_params(layer_params)
         
         _load_param(self.final_norm.scale, params["model"]["norm"]["weight"])
-        _load_param(self.lm_head.kernel, params["lm_head"]["weight"].T)
+        # _load_param(self.lm_head.kernel, params["lm_head"]["weight"].T)
+
+        # _load_param(self.lm_head.kernel, params['model']['embed_tokens']['weight'].T)
 
     def __call__(
         self, tokens: jax.Array, positions: jax.Array, carry: tuple[KVCache, ...] | None=None
@@ -300,7 +302,9 @@ class Qwen3(nnx.Module):
                 x, _ = layer(x, sin, cos)
         
         x = self.final_norm(x)
-        logits = self.lm_head(x)
+        logits = x @ self.embeddings.embedding.value.T
+
+        logits = logits.astype(jnp.float32)
 
         return logits, carry
 
