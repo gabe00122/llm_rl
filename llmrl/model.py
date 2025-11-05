@@ -2,9 +2,9 @@ from typing import Any, NamedTuple
 import jax
 from jax import numpy as jnp
 from flax import nnx
-from llmrl2.config import Config
+from llmrl.config import Config
 
-from llmrl2.rope import apply_rotary_embedding, generate_pos_embeddings
+from llmrl.rope import apply_rotary_embedding, generate_pos_embeddings
 
 
 def _load_param(target: nnx.Param[jax.Array], value):

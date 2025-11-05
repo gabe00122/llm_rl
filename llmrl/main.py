@@ -5,10 +5,10 @@ from jax import numpy as jnp
 import jax
 from flax import nnx
 
-from llmrl2.config import load_config
-from llmrl2.model import Qwen3
-from llmrl2.util import load_tokenizer
-from llmrl2.checkpoint import load_safetensors
+from llmrl.config import load_config
+from llmrl.model import Qwen3
+from llmrl.util import load_tokenizer
+from llmrl.checkpoint import load_safetensors
 
 PAD_ID = 151643
 

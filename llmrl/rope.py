@@ -1,7 +1,7 @@
 import jax
 from jax import numpy as jnp
 
-from llmrl2.config import Config
+from llmrl.config import Config
 
 
 def generate_pos_embeddings(

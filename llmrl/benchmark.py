@@ -10,9 +10,9 @@ from flax import nnx
 from rich.console import Console
 from rich.table import Table
 
-from llmrl2.checkpoint import load_param_dict, load_safetensors
-from llmrl2.config import load_config, Config
-from llmrl2.model import Qwen3
+from llmrl.checkpoint import load_param_dict, load_safetensors
+from llmrl.config import load_config, Config
+from llmrl.model import Qwen3
 
 
 console = Console()
