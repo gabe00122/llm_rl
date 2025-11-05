@@ -124,17 +124,28 @@ class AttentionLayer(nnx.Module):
 
         return KVCache(key, value, lengths)
     
-    def _update_carry(self, carry: KVCache, key: jax.Array, value: jax.Array):
-        # batch_idx = jnp.arange(carry.length.shape[0], dtype=jnp.int32)
-        # batch_idx = batch_idx[:, None]
+    def _update_carry(self, carry: KVCache, key_update: jax.Array, value_update: jax.Array):
+        scatter_indices = carry.length.astype(jnp.int32)[:, None]
 
-        pos = carry.length[0]
+        dnums = jax.lax.ScatterDimensionNumbers(
+            update_window_dims=(1, 2),
+            inserted_window_dims=(1,),
+            scatter_dims_to_operand_dims=(1,),
+            operand_batching_dims=(0,),
+            scatter_indices_batching_dims=(0,),
+        )
 
-        key = jax.lax.dynamic_update_slice(carry.key, key, (0, pos, 0, 0))
-        value = jax.lax.dynamic_update_slice(carry.value, value, (0, pos, 0, 0))
-        length = carry.length + 1
+        new_key = jax.lax.scatter(
+            carry.key, scatter_indices, key_update.squeeze(1), dnums,
+            unique_indices=True,
+        )
+        new_value = jax.lax.scatter(
+            carry.value, scatter_indices, value_update.squeeze(1), dnums,
+            unique_indices=True,
+        )
 
-        return KVCache(key, value, length)
+        return KVCache(new_key, new_value, carry.length + 1)
+
 
     def __call__(self, inputs: jax.Array, sin: jax.Array, cos: jax.Array, carry: KVCache | None = None) -> tuple[jax.Array, KVCache | None]:
         key = self.key_proj(inputs)

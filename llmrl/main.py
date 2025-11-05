@@ -111,12 +111,12 @@ def generate(model: Qwen3, prompt: jax.Array, prompt_length: jax.Array, rng_key)
         # sample_tokens = sample(logits.squeeze(axis=1), rng_key)[:, None]
         sample_tokens = jax.random.categorical(rng_key, logits)
 
-        # next_inputs =  jnp.where((i + 1 < prompt_length)[:, None], prompt_token[:, None], sample_tokens)
-        next_inputs =  jax.lax.cond(
-            i < prompt_length,
-            lambda: prompt[:, i][:, None],
-            lambda: sample_tokens
-        )
+        next_inputs =  jnp.where((i + 1 < prompt_length)[:, None], prompt_token[:, None], sample_tokens)
+        # next_inputs =  jax.lax.cond(
+        #     i < prompt_length,
+        #     lambda: prompt[:, i][:, None],
+        #     lambda: sample_tokens
+        # )
 
         carry = kv_cache, next_inputs
         return tokens, carry
@@ -145,14 +145,14 @@ def main():
     model.load_params(params)
     del params
 
-    batch_size = 1 #128 // 2
-    seq_length = 4096 * 4 #512 * 2
+    batch_size = 128
+    seq_length = 512
 
     while True:
         prompt = input("Prompt: ")
         prompt_tokens, lengths = encode_input(tokenizer, [prompt] * batch_size, seq_length)
         start_time = time.time()
-        output = generate(model, prompt_tokens, lengths[0], rngs.sample())
+        output = generate(model, prompt_tokens, lengths, rngs.sample())
 
         for b in range(1):
             output_text: str = tokenizer.decode(output[b].squeeze().tolist())
@@ -184,17 +184,12 @@ def main2():
         prompt = input("Prompt: ")
         prompt_tokens, lengths = encode_input(tokenizer, [prompt] * batch_size, seq_length)
         start_time = time.time()
-
-        kv_cache = model.initialize_carry(batch_size, seq_length)
-        token_input = prompt_tokens[:, 0][:, None]
         
-        for i in range(seq_length):
-            token_input, kv_cache = generate_single(model, kv_cache, token_input, jnp.int32(i+1), prompt_tokens, lengths[0], rngs.sample())
+        output = generate(model, prompt_tokens, lengths, rngs.sample())
 
-        token_input.block_until_ready()
-        # output_text: str = tokenizer.decode(output[0].squeeze().tolist())
+        output_text: str = tokenizer.decode(output[0].squeeze().tolist())
         stop_time = time.time()
-        # print(output_text.split("<|im_end|>")[1])
+        print(output_text.split("<|im_end|>")[1])
 
         delta_time = stop_time - start_time
         print(f"TPS: {(batch_size * seq_length) // delta_time}")
