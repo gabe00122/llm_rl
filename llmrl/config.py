@@ -68,3 +68,19 @@ def hf_to_jax_config(hf_config: Any | dict[str, Any]) -> "Config":
 
 def load_config(config_path: str | os.PathLike[str] | Path) -> "Config":
     return hf_to_jax_config(json.loads(Path(config_path).read_text()))
+
+
+class SamplingConfig(NamedTuple):
+    temperature: float
+    top_k: int
+    top_p: float
+
+def load_sampling_config(config_path: str | os.PathLike[str] | Path) -> SamplingConfig:
+    with open(config_path, "r") as f:
+        data: dict[str, Any] = json.load(f)
+    
+    temperature = data.get("temperature", 1.0)
+    top_k = data.get("top_k", 20)
+    top_p = data.get("top_p", 1.0)
+
+    return SamplingConfig(temperature, top_k, top_p)

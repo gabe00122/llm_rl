@@ -124,8 +124,8 @@ class AttentionLayer(nnx.Module):
 
         return KVCache(key, value, lengths)
     
-    def _update_carry(self, carry: KVCache, key_update: jax.Array, value_update: jax.Array):
-        scatter_indices = carry.length.astype(jnp.int32)[:, None]
+    def _update_carry(self, carry: KVCache, key_update: jax.Array, value_update: jax.Array) -> KVCache:
+        scatter_indices = carry.length[:, None]
 
         dnums = jax.lax.ScatterDimensionNumbers(
             update_window_dims=(1, 2),
