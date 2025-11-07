@@ -21,26 +21,53 @@ class MlpLayer(nnx.Module):
         self.up_gate = nnx.Linear(
             config.embed,
             config.mlp_ffw_size,
-            dtype=jnp.bfloat16, param_dtype=jnp.bfloat16,
+            dtype=jnp.bfloat16,
+            param_dtype=jnp.bfloat16,
             use_bias=False,
             rngs=rngs,
         )
         self.up_proj = nnx.Linear(
             config.embed,
             config.mlp_ffw_size,
-            dtype=jnp.bfloat16, param_dtype=jnp.bfloat16,
+            dtype=jnp.bfloat16,
+            param_dtype=jnp.bfloat16,
             use_bias=False,
             rngs=rngs,
         )
         self.down_proj = nnx.Linear(
             config.mlp_ffw_size,
             config.embed,
-            dtype=jnp.bfloat16, param_dtype=jnp.bfloat16,
+            dtype=jnp.bfloat16,
+            param_dtype=jnp.bfloat16,
             use_bias=False,
             rngs=rngs,
         )
+        rank = 32
 
-        self.down_proj.kernel.value.device
+        self.up_gate_lora = nnx.LoRA(
+            config.embed,
+            rank,
+            config.mlp_ffw_size,
+            dtype=jnp.bfloat16,
+            param_dtype=jnp.bfloat16,
+            rngs=rngs,
+        )
+        self.up_proj_lora = nnx.LoRA(
+            config.embed,
+            rank,
+            config.mlp_ffw_size,
+            dtype=jnp.bfloat16,
+            param_dtype=jnp.bfloat16,
+            rngs=rngs,
+        )
+        self.down_proj_lora = nnx.LoRA(
+            config.mlp_ffw_size,
+            rank,
+            config.embed,
+            dtype=jnp.bfloat16,
+            param_dtype=jnp.bfloat16,
+            rngs=rngs,
+        )
 
     def load_params(self, params):
         # pass in the mlp dict
@@ -49,9 +76,11 @@ class MlpLayer(nnx.Module):
         _load_param(self.down_proj.kernel, params["down_proj"]["weight"].T)
 
     def __call__(self, inputs):
-        up = self.up_proj(inputs)
-        gate = jax.nn.silu(self.up_gate(inputs))
-        out = self.down_proj(up * gate)
+        up = self.up_proj(inputs) + self.up_proj_lora(inputs)
+        gate = jax.nn.silu(self.up_gate(inputs) + self.up_gate_lora(inputs))
+        
+        down_in = up * gate
+        out = self.down_proj(down_in) + self.down_proj_lora(down_in)
         return out
     
 

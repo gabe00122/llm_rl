@@ -4,6 +4,7 @@ from typing import Any, NamedTuple
 from jax import numpy as jnp
 import jax
 from flax import nnx
+import optax
 # from tokenizers import Tokenizer
 from transformers import PreTrainedTokenizerFast
 
@@ -133,8 +134,11 @@ def main():
     model.load_params(params)
     del params
 
+    tx = optax.adam(0.01)
+    optimizer = nnx.Optimizer(model, tx, wrt=nnx.LoRAParam)
+
     batch_size = 1
-    seq_length = 512
+    seq_length = 2048
 
     while True:
         prompt = input("Prompt: ")
