@@ -4,7 +4,7 @@ from jax import numpy as jnp
 from flax import nnx
 from llmrl.config import Config
 
-from llmrl.rope import apply_rotary_embedding, generate_pos_embeddings
+from llmrl.rope import apply_rope
 
 
 def _load_param(target: nnx.Param[jax.Array], value):
@@ -87,7 +87,7 @@ class MlpLayer(nnx.Module):
 class KVCache(NamedTuple):
     key: jax.Array
     value: jax.Array
-    length: jax.Array
+    # length: jax.Array
     
 
 class AttentionLayer(nnx.Module):
@@ -96,6 +96,7 @@ class AttentionLayer(nnx.Module):
 
         self._num_kv_heads = config.kv_heads
         self._head_dim = config.head_dim
+        self._rope_theta = config.rope_theta
 
         self.key_proj = nnx.LinearGeneral(
             in_features=config.embed,
@@ -149,12 +150,12 @@ class AttentionLayer(nnx.Module):
         shape = (batch_size, seq_length, self._num_kv_heads, self._head_dim)
         key = jnp.zeros(shape, dtype=jnp.bfloat16)
         value = jnp.zeros(shape, dtype=jnp.bfloat16)
-        lengths = jnp.zeros((batch_size,), dtype=jnp.int32)
+        # lengths = jnp.zeros((batch_size,), dtype=jnp.int32)
 
-        return KVCache(key, value, lengths)
+        return KVCache(key, value)
     
-    def _update_carry(self, carry: KVCache, key_update: jax.Array, value_update: jax.Array) -> KVCache:
-        scatter_indices = carry.length[:, None]
+    def _update_carry(self, carry: KVCache, positions: jax.Array, key_update: jax.Array, value_update: jax.Array) -> KVCache:
+        scatter_indices = positions
 
         dnums = jax.lax.ScatterDimensionNumbers(
             update_window_dims=(1, 2),
@@ -173,10 +174,10 @@ class AttentionLayer(nnx.Module):
             unique_indices=True,
         )
 
-        return KVCache(new_key, new_value, carry.length + 1)
+        return KVCache(new_key, new_value)
 
 
-    def __call__(self, inputs: jax.Array, sin: jax.Array, cos: jax.Array, carry: KVCache | None = None) -> tuple[jax.Array, KVCache | None]:
+    def __call__(self, inputs: jax.Array, positions: jax.Array, carry: KVCache | None = None) -> tuple[jax.Array, KVCache | None]:
         key = self.key_proj(inputs)
         value = self.value_proj(inputs)
         query = self.query_proj(inputs)
@@ -184,17 +185,17 @@ class AttentionLayer(nnx.Module):
         key = self.key_norm(key)
         query = self.query_norm(query)
 
-        key = apply_rotary_embedding(key, sin, cos)
-        query = apply_rotary_embedding(query, sin, cos)
+        key = apply_rope(key, positions, self._head_dim, self._rope_theta)
+        query = apply_rope(query, positions, self._head_dim, self._rope_theta)
 
         if carry is not None:
-            carry = self._update_carry(carry, key, value)
+            carry = self._update_carry(carry, positions, key, value)
 
             x = jax.nn.dot_product_attention(
                 query,
                 carry.key,
                 carry.value,
-                key_value_seq_lengths=carry.length,
+                key_value_seq_lengths=positions.squeeze(-1) + 1,
                 implementation="cudnn",
             )
         else:
@@ -250,9 +251,9 @@ class Qwen3Layer(nnx.Module):
             rngs=rngs,
         )
 
-    def __call__(self, inputs: jax.Array, sin: jax.Array, cos: jax.Array, carry: KVCache | None = None) -> tuple[jax.Array, KVCache | None]:
+    def __call__(self, inputs: jax.Array, positions: jax.Array, carry: KVCache | None = None) -> tuple[jax.Array, KVCache | None]:
         attn_in = self.attn_pre_norm(inputs)
-        attn_out, carry = self.attn(attn_in, sin, cos, carry)
+        attn_out, carry = self.attn(attn_in, positions, carry)
         x = inputs + attn_out
 
         ff_in = self.attn_post_norm(x)
@@ -328,18 +329,15 @@ class Qwen3(nnx.Module):
     ) -> tuple[jax.Array, tuple[KVCache, ...] | None]:
         x = self.embeddings(tokens)
 
-        # positions = jnp.repeat(jnp.arange(tokens.shape[1])[None, :], tokens.shape[0], axis=0)
-        sin, cos = generate_pos_embeddings(positions, self._head_dim, self._rope_theta)  # [B, T, head_dim]
-
         if carry is not None:
             out_carry = []
             for layer, layer_carry_in in zip(self.layers, carry):
-                x, layer_carry_out = layer(x, sin, cos, layer_carry_in)
+                x, layer_carry_out = layer(x, positions, layer_carry_in)
                 out_carry.append(layer_carry_out)
             carry = tuple(out_carry)
         else:
             for layer in self.layers:
-                x, _ = layer(x, sin, cos)
+                x, _ = layer(x, positions)
         
         x = self.final_norm(x)
         logits = x @ self.embeddings.embedding.value.T

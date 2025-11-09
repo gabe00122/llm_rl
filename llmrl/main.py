@@ -14,6 +14,7 @@ from llmrl.util import load_tokenizer
 from llmrl.checkpoint import load_safetensors
 
 PAD_ID = 151643
+# END_TOKEN = 151644
 
 
 def encode_input(tokenizer: PreTrainedTokenizerFast, texts: list[str], pad_size: int, pad_id: int = PAD_ID):
@@ -45,7 +46,7 @@ def sample(config: SamplingConfig, logits, rng_key):
 
     return sampled_ids
 
-
+@partial(nnx.jit, donate_argnums=(0,2,3,4,6), static_argnums=(1,))
 def generate_some(
         model: Qwen3,
         sampling_config: SamplingConfig,
@@ -56,37 +57,61 @@ def generate_some(
         rng_key: jax.Array
     ):
 
-    B = prompt.shape[0]
+    B, seq_length = prompt.shape
 
     class GenerateCarry(NamedTuple):
-        tokens: jax.Array
+        next_tokens: jax.Array
+        context: jax.Array
         kv_cache: Any
         positions: jax.Array
         rng_key: jax.Array
         finished: jax.Array
-
-    init_carry = GenerateCarry(
-        prompt[:, 0][:, None],
-        kv_cache,
-        positions,
-        rng_key,
-        jnp.zeros((B,), jnp.bool_)
-    )
     
     def cond(carry: GenerateCarry):
         return jnp.logical_not(jnp.all(carry.finished))
     
     def body(carry: GenerateCarry):
-        logits, kv_cache = model(carry.tokens, positions, carry.kv_cache)
+        logits, kv_cache = model(carry.next_tokens[..., None], carry.positions[..., None], carry.kv_cache)
 
         sample_key, rng_key = jax.random.split(carry.rng_key)
-        sample_tokens = sample(sampling_config, logits.squeeze(-1), sample_key)
+        sample_tokens = sample(sampling_config, logits.squeeze(axis=-2), sample_key)
 
+        # sample_tokens = jax.random.categorical(sample_key, logits)
 
+        batch_index = jnp.arange(B, dtype=jnp.int32)
 
-        return carry
+        next_positions = jnp.where(carry.finished, carry.positions, carry.positions + 1)
+        next_tokens =  jnp.where(
+            jnp.logical_or(next_positions < prompt_lengths, carry.finished),
+            carry.context[batch_index, next_positions],
+            sample_tokens
+        )
+
+        next_context = carry.context.at[batch_index, next_positions].set(next_tokens)
+        next_finished = jnp.logical_or(carry.finished, next_positions >= seq_length)
+        next_finished = jnp.logical_or(next_finished, next_tokens == PAD_ID)
+
+        return GenerateCarry(
+            next_tokens,
+            next_context,
+            kv_cache,
+            next_positions,
+            rng_key,
+            next_finished
+        )
+    
+    init_carry = GenerateCarry(
+        prompt[:, 0],
+        prompt,
+        kv_cache,
+        positions,
+        rng_key,
+        jnp.zeros((B,), jnp.bool_)
+    )
 
     out = nnx.while_loop(cond, body, init_carry)
+
+    return out.kv_cache, out.positions, out.context, out.rng_key
 
 @partial(nnx.jit, donate_argnums=(0,), static_argnums=(1,))
 def generate(model: Qwen3, sampling: SamplingConfig, prompt: jax.Array, prompt_length: jax.Array, rng_key):
@@ -134,25 +159,31 @@ def main():
     model.load_params(params)
     del params
 
-    tx = optax.adam(0.01)
-    optimizer = nnx.Optimizer(model, tx, wrt=nnx.LoRAParam)
+    # tx = optax.adam(0.01)
+    # optimizer = nnx.Optimizer(model, tx, wrt=nnx.LoRAParam)
 
-    batch_size = 1
-    seq_length = 2048
+    batch_size = 2
+    seq_length = 4096
+
+    kv_cache = model.initialize_carry(batch_size, seq_length)
+    positions = jnp.zeros((batch_size,), jnp.int32)
 
     while True:
         prompt = input("Prompt: ")
-        prompt_tokens, lengths = encode_input(tokenizer, [prompt] * batch_size, seq_length)
+        prompt_tokens, lengths = encode_input(tokenizer, ["How long do dogs live", prompt], seq_length)
         start_time = time.time()
-        output = generate(model, sampling, prompt_tokens, lengths, rngs.sample())
+        kv_cache, positions, output, rng_key = generate_some(model, sampling, kv_cache, positions, prompt_tokens, lengths, rngs.sample())
 
-        for b in range(1):
+        for b in range(2):
             output_text: str = tokenizer.decode(output[b].squeeze().tolist())
-            print(output_text.split("<|im_end|>")[1])
+            print(output_text)
         
         stop_time = time.time()
         delta_time = stop_time - start_time
-        print(f"TPS: {(batch_size * seq_length) // delta_time}")
+        total_tokens = positions[0].item() - lengths[0].item()
+        print(f"TPS: {(total_tokens) // delta_time}")
+
+        positions = jnp.zeros((batch_size, 1), jnp.int32)
 
 
 if __name__ == "__main__":
