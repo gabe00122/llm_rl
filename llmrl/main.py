@@ -2,6 +2,7 @@ from functools import partial
 import time
 from typing import Any, NamedTuple
 from jax import numpy as jnp
+import numpy as np
 import jax
 from flax import nnx
 import optax
@@ -17,15 +18,21 @@ PAD_ID = 151643
 # END_TOKEN = 151644
 
 
-def encode_input(tokenizer: PreTrainedTokenizerFast, texts: list[str], pad_size: int, pad_id: int = PAD_ID):
-    assert isinstance(texts, list)
-    inputs = [
-        tokenizer.apply_chat_template([{"role": "user", "content": text}], add_generation_prompt=True)
-        for text in texts
-    ]
-    lengths = [len(x) for x in inputs]
-    inputs = [x + (pad_size - length) * [pad_id] for x, length in zip(inputs, lengths)]
-    return jnp.array(inputs), jnp.array(lengths)
+def encode_input(tokenizer: PreTrainedTokenizerFast, conversations: list[list[dict]], pad_size: int):
+    # assert isinstance(texts, list)
+    inputs = tokenizer.apply_chat_template(
+        conversations,
+        padding='max_length',
+        max_length=pad_size,
+        add_generation_prompt=True,
+        return_tensors='np'
+    )
+    return jnp.array(inputs)
+
+
+def get_last_turn(text: str) -> str:
+    llm_response = text.split("<|im_start|>assistant\n")[-1]
+    return llm_response.split("<|im_end|>")[0]
 
 
 def sample(config: SamplingConfig, logits, rng_key):
@@ -46,14 +53,13 @@ def sample(config: SamplingConfig, logits, rng_key):
 
     return sampled_ids
 
-@partial(nnx.jit, donate_argnums=(0,2,3,4,6), static_argnums=(1,))
+@partial(nnx.jit, donate_argnums=(0,2,3,4,5), static_argnums=(1,))
 def generate_some(
         model: Qwen3,
         sampling_config: SamplingConfig,
         kv_cache,
         positions: jax.Array,
         prompt: jax.Array,
-        prompt_lengths: jax.Array,
         rng_key: jax.Array
     ):
 
@@ -75,15 +81,16 @@ def generate_some(
 
         sample_key, rng_key = jax.random.split(carry.rng_key)
         sample_tokens = sample(sampling_config, logits.squeeze(axis=-2), sample_key)
-
         # sample_tokens = jax.random.categorical(sample_key, logits)
 
         batch_index = jnp.arange(B, dtype=jnp.int32)
 
         next_positions = jnp.where(carry.finished, carry.positions, carry.positions + 1)
+
+        prompt_tokens = carry.context[batch_index, next_positions]
         next_tokens =  jnp.where(
-            jnp.logical_or(next_positions < prompt_lengths, carry.finished),
-            carry.context[batch_index, next_positions],
+            jnp.logical_or(prompt_tokens != PAD_ID, carry.finished),
+            prompt_tokens,
             sample_tokens
         )
 
@@ -162,28 +169,35 @@ def main():
     # tx = optax.adam(0.01)
     # optimizer = nnx.Optimizer(model, tx, wrt=nnx.LoRAParam)
 
-    batch_size = 2
+    batch_size = 1
     seq_length = 4096
 
+    rng_key = rngs.sample()
     kv_cache = model.initialize_carry(batch_size, seq_length)
     positions = jnp.zeros((batch_size,), jnp.int32)
 
+    conversations = [[]]
+
     while True:
         prompt = input("Prompt: ")
-        prompt_tokens, lengths = encode_input(tokenizer, ["How long do dogs live", prompt], seq_length)
+        conversations[0].append({"role": "user", "content": prompt})
+        prompt_tokens = encode_input(tokenizer, conversations, seq_length)
         start_time = time.time()
-        kv_cache, positions, output, rng_key = generate_some(model, sampling, kv_cache, positions, prompt_tokens, lengths, rngs.sample())
+        start_pos = positions[0].item()
 
-        for b in range(2):
-            output_text: str = tokenizer.decode(output[b].squeeze().tolist())
-            print(output_text)
+        kv_cache, positions, output, rng_key = generate_some(model, sampling, kv_cache, positions, prompt_tokens, rng_key)
+
+        output_text: list[str] = tokenizer.batch_decode(np.asarray(output))
+        out = get_last_turn(output_text[0])
+        print(out)
+        conversations[0].append({"role": "assistant", "content": out})
         
         stop_time = time.time()
         delta_time = stop_time - start_time
-        total_tokens = positions[0].item() - lengths[0].item()
-        print(f"TPS: {(total_tokens) // delta_time}")
-
-        positions = jnp.zeros((batch_size, 1), jnp.int32)
+        end_pos = positions[0].item()
+        total_tokens = end_pos - start_pos
+        print(f"TPS: {total_tokens // delta_time}")
+        print(f"Context: {end_pos}/{seq_length}")
 
 
 if __name__ == "__main__":
