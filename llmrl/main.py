@@ -15,6 +15,8 @@ from llmrl.util import load_tokenizer
 from llmrl.checkpoint import load_safetensors
 
 PAD_ID = 151643
+EOS_1 = 151645
+EOS_2 = 151643
 # END_TOKEN = 151644
 
 
@@ -54,7 +56,7 @@ def sample(config: SamplingConfig, logits, rng_key):
     return sampled_ids
 
 @partial(nnx.jit, donate_argnums=(0,2,3,4,5), static_argnums=(1,))
-def generate_some(
+def generate(
         model: Qwen3,
         sampling_config: SamplingConfig,
         kv_cache,
@@ -64,6 +66,7 @@ def generate_some(
     ):
 
     B, seq_length = prompt.shape
+    batch_index = jnp.arange(B, dtype=jnp.int32)
 
     class GenerateCarry(NamedTuple):
         next_tokens: jax.Array
@@ -83,20 +86,22 @@ def generate_some(
         sample_tokens = sample(sampling_config, logits.squeeze(axis=-2), sample_key)
         # sample_tokens = jax.random.categorical(sample_key, logits)
 
-        batch_index = jnp.arange(B, dtype=jnp.int32)
-
         next_positions = jnp.where(carry.finished, carry.positions, carry.positions + 1)
 
         prompt_tokens = carry.context[batch_index, next_positions]
+        use_sample = jnp.logical_and(jnp.logical_or(prompt_tokens == PAD_ID, carry.finished), jnp.logical_not(carry.finished))
         next_tokens =  jnp.where(
-            jnp.logical_or(prompt_tokens != PAD_ID, carry.finished),
-            prompt_tokens,
-            sample_tokens
+            use_sample,
+            sample_tokens,
+            prompt_tokens
         )
 
         next_context = carry.context.at[batch_index, next_positions].set(next_tokens)
-        next_finished = jnp.logical_or(carry.finished, next_positions >= seq_length)
-        next_finished = jnp.logical_or(next_finished, next_tokens == PAD_ID)
+        next_finished = jnp.logical_or(carry.finished, next_positions >= seq_length - 1)
+
+        # we check to make sure we aren't reading the prompt and that the model sampled a end token
+        next_finished = jnp.logical_or(next_finished, jnp.logical_and(sample_tokens == EOS_1, use_sample))
+        # jax.debug.print("{}", next_tokens[0])
 
         return GenerateCarry(
             next_tokens,
@@ -107,8 +112,9 @@ def generate_some(
             next_finished
         )
     
+
     init_carry = GenerateCarry(
-        prompt[:, 0],
+        prompt[batch_index, positions],
         prompt,
         kv_cache,
         positions,
@@ -119,36 +125,6 @@ def generate_some(
     out = nnx.while_loop(cond, body, init_carry)
 
     return out.kv_cache, out.positions, out.context, out.rng_key
-
-@partial(nnx.jit, donate_argnums=(0,), static_argnums=(1,))
-def generate(model: Qwen3, sampling: SamplingConfig, prompt: jax.Array, prompt_length: jax.Array, rng_key):
-    batch_size, seq_size = prompt.shape
-
-    kv_cache = model.initialize_carry(batch_size, seq_size)
-
-    @nnx.scan(in_axes=(0, 1, 0, nnx.Carry), out_axes=(1, nnx.Carry))
-    def _step(i, prompt_token, rng_key, carry):
-        kv_cache, tokens = carry
-
-        positions = jnp.full((batch_size, 1), i, dtype=jnp.int32) # is this slow?
-
-        logits, kv_cache = model(tokens, positions, kv_cache)
-        sample_tokens = sample(sampling, logits.squeeze(axis=1), rng_key)[:, None]
-        # sample_tokens = jax.random.categorical(rng_key, logits)
-
-        next_inputs =  jnp.where((i + 1 < prompt_length)[:, None], prompt_token[:, None], sample_tokens)
-
-        carry = kv_cache, next_inputs
-        return tokens, carry
-    
-    output, _ = _step(
-        jnp.arange(seq_size),
-        jnp.roll(prompt, -1),
-        jax.random.split(rng_key, seq_size),
-        (kv_cache, prompt[:,:1])
-    )
-
-    return output
 
 
 def main():
@@ -169,35 +145,48 @@ def main():
     # tx = optax.adam(0.01)
     # optimizer = nnx.Optimizer(model, tx, wrt=nnx.LoRAParam)
 
-    batch_size = 1
-    seq_length = 4096
+    batch_size = 128
+    seq_length = 512
 
     rng_key = rngs.sample()
     kv_cache = model.initialize_carry(batch_size, seq_length)
     positions = jnp.zeros((batch_size,), jnp.int32)
 
-    conversations = [[]]
+    conversations = []
+    for _ in range(batch_size):
+        conversations.append([])
 
     while True:
         prompt = input("Prompt: ")
-        conversations[0].append({"role": "user", "content": prompt})
-        prompt_tokens = encode_input(tokenizer, conversations, seq_length)
-        start_time = time.time()
-        start_pos = positions[0].item()
 
-        kv_cache, positions, output, rng_key = generate_some(model, sampling, kv_cache, positions, prompt_tokens, rng_key)
+        if prompt == "/clear":
+            positions = jnp.zeros((batch_size,), jnp.int32)
+            conversations = []
+            for _ in range(batch_size):
+                conversations.append([])
+            continue
+
+        for conv in conversations:
+            conv.append({"role": "user", "content": prompt})
+        prompt_tokens = encode_input(tokenizer, conversations, seq_length)
+        # print(prompt_tokens.shape)
+        start_time = time.time()
+        start_pos = positions.copy()
+
+        kv_cache, positions, output, rng_key = generate(model, sampling, kv_cache, positions, prompt_tokens, rng_key)
 
         output_text: list[str] = tokenizer.batch_decode(np.asarray(output))
-        out = get_last_turn(output_text[0])
-        print(out)
-        conversations[0].append({"role": "assistant", "content": out})
+        for conv, out in zip(conversations, output_text):
+            assistant = get_last_turn(out)
+            print("--------")
+            print(assistant)
+            conv.append({"role": "assistant", "content": assistant})
         
         stop_time = time.time()
         delta_time = stop_time - start_time
-        end_pos = positions[0].item()
-        total_tokens = end_pos - start_pos
+        total_tokens = jnp.sum(positions - start_pos).item()
         print(f"TPS: {total_tokens // delta_time}")
-        print(f"Context: {end_pos}/{seq_length}")
+        print(f"Context: {positions[0].item()}/{seq_length}")
 
 
 if __name__ == "__main__":
