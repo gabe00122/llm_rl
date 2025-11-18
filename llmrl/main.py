@@ -12,7 +12,7 @@ from transformers import PreTrainedTokenizerFast
 from llmrl.config import SamplingConfig, load_config, load_sampling_config
 from llmrl.model import Qwen3
 from llmrl.util import load_tokenizer
-from llmrl.checkpoint import load_safetensors
+from llmrl.checkpoint import load_model, load_safetensors
 
 PAD_ID = 151643
 EOS_1 = 151645
@@ -20,8 +20,7 @@ EOS_2 = 151643
 # END_TOKEN = 151644
 
 
-def encode_input(tokenizer: PreTrainedTokenizerFast, conversations: list[list[dict]], pad_size: int):
-    # assert isinstance(texts, list)
+def encode_input(tokenizer: PreTrainedTokenizerFast, conversations: list[list[dict]] | list[dict], pad_size: int):
     inputs = tokenizer.apply_chat_template(
         conversations,
         padding='max_length',
@@ -83,8 +82,11 @@ def generate(
         logits, kv_cache = model(carry.next_tokens[..., None], carry.positions[..., None], carry.kv_cache)
 
         sample_key, rng_key = jax.random.split(carry.rng_key)
-        sample_tokens = sample(sampling_config, logits.squeeze(axis=-2), sample_key)
-        # sample_tokens = jax.random.categorical(sample_key, logits)
+
+        if sampling_config.temperature == 0.0:
+            sample_tokens = jnp.argmax(logits.squeeze(-2), -1)
+        else:
+            sample_tokens = sample(sampling_config, logits.squeeze(axis=-2), sample_key)
 
         next_positions = jnp.where(carry.finished, carry.positions, carry.positions + 1)
 
@@ -127,27 +129,7 @@ def generate(
     return out.kv_cache, out.positions, out.context, out.rng_key
 
 
-def main():
-    model_path = "./base-models/Qwen3-4B-Instruct-2507"
-
-    # model_path = "./base-models/qwen3-0.6b"
-    config = load_config(f"{model_path}/config.json")
-    params = load_safetensors(model_path)
-    tokenizer = load_tokenizer(model_path)
-    sampling = load_sampling_config(f"{model_path}/generation_config.json")
-
-    print(config)
-    rngs = nnx.Rngs(0)
-    model = Qwen3(config, rngs=rngs)
-    model.load_params(params)
-    del params
-
-    # tx = optax.adam(0.01)
-    # optimizer = nnx.Optimizer(model, tx, wrt=nnx.LoRAParam)
-
-    batch_size = 128
-    seq_length = 512
-
+def chat(model: Qwen3, tokenizer, sampling, batch_size: int, seq_length: int, rngs: nnx.Rngs):
     rng_key = rngs.sample()
     kv_cache = model.initialize_carry(batch_size, seq_length)
     positions = jnp.zeros((batch_size,), jnp.int32)
@@ -187,6 +169,18 @@ def main():
         total_tokens = jnp.sum(positions - start_pos).item()
         print(f"TPS: {total_tokens // delta_time}")
         print(f"Context: {positions[0].item()}/{seq_length}")
+
+
+
+def main():
+    # model_path = "./base-models/qwen3-0.6b"
+    model_path = "./base-models/Qwen3-4B-Instruct-2507"
+    rngs = nnx.Rngs(0)
+    model, tokenizer, sampling = load_model(model_path, rngs)
+
+    batch_size = 1
+    seq_length = 16384 #512
+    chat(model, tokenizer, sampling, batch_size, seq_length, rngs)
 
 
 if __name__ == "__main__":

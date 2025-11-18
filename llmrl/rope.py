@@ -1,7 +1,6 @@
 import jax
 from jax import numpy as jnp
 
-
 def apply_rope(
     inputs: jax.Array,
     positions: jax.Array,
@@ -9,7 +8,7 @@ def apply_rope(
     max_wavelength: float,
 ) -> jax.Array:
     """Applies RoPE."""
-    fraction = 2 * jnp.arange(0, head_dim // 2) / head_dim
+    fraction = 2 * jnp.arange(0, head_dim // 2, dtype=jnp.float32) / head_dim
     timescale = max_wavelength**fraction
 
     sinusoid_inp = positions[..., jnp.newaxis] / timescale[jnp.newaxis, jnp.newaxis, :]

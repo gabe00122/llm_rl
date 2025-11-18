@@ -84,3 +84,9 @@ def load_sampling_config(config_path: str | os.PathLike[str] | Path) -> Sampling
     top_p = data.get("top_p", 1.0)
 
     return SamplingConfig(temperature, top_k, top_p)
+
+
+class LoraConfig(NamedTuple):
+    mlp_lora: bool
+    attn_lora: bool
+    rank: int
