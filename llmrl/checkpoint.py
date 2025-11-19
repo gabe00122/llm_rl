@@ -1,15 +1,19 @@
 from __future__ import annotations
+
 from pathlib import Path
 
-import flax
-from safetensors import safe_open
-from rich.progress import track
-
+import jax
+import orbax.checkpoint as ocp
 from flax import nnx
+from flax.nnx.filterlib import Filter
+from jax.sharding import Mesh
+from rich.progress import track
+from safetensors import safe_open
 
 from llmrl.config import LoraConfig, load_config, load_sampling_config
 from llmrl.model import Qwen3
 from llmrl.util import load_tokenizer
+
 
 
 def _put_path(data: dict, path: list[str], value) -> None:
@@ -52,14 +56,6 @@ def load_model(model_path: str, lora_config: LoraConfig, rngs: nnx.Rngs):
     model.load_params(params)
     
     return model, tokenizer, sampling
-
-import orbax.checkpoint as ocp
-from flax import nnx
-from flax.nnx.filterlib import Filter
-from pathlib import Path
-
-import jax
-from jax.sharding import Mesh
 
 
 class Checkpointer:
