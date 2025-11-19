@@ -4,7 +4,7 @@ from jax import numpy as jnp
 from flax import nnx
 import optax
 
-from llmrl.checkpoint import load_model
+from llmrl.checkpoint import Checkpointer, load_model
 from llmrl.config import LoraConfig
 from llmrl.main import PAD_ID, chat, encode_input
 from llmrl.model import Qwen3
@@ -60,6 +60,8 @@ def main():
     dataset = dataset.map(lambda sample: create_conversation(tokenizer, sample, seq_length), remove_columns=dataset.features, batched=True)
     dataset = dataset.with_format("jax")
 
+    checkpointer = Checkpointer("./checkpoints/test")
+
     # lr = optax.linear_schedule(0.0002, 0.0, )
     total_steps = epochs * len(dataset)
     warmup_steps = total_steps // 10
@@ -72,17 +74,23 @@ def main():
     tx = optax.adamw(learning_rate, weight_decay=0.01)
     optimizer = nnx.Optimizer(model, tx, wrt=nnx.LoRAParam)
 
-    for epoch in range(epochs):
-        dataset = dataset.shuffle()
-        for batch in dataset.iter(batch_size, drop_last_batch=True):
-            tokens = batch["messages"]
-            loss = update_step(optimizer, model, tokens)
-            print(loss)
+    with checkpointer:
+        param_filter = nnx.filterlib.Any(nnx.LoRAParam, nnx.OptState)
+        checkpointer.save((optimizer, model), 0, param_filter)
 
-    del optimizer
-    batch_size = 1
-    seq_length = 2048
-    chat(model, tokenizer, sampling, batch_size, seq_length, rngs)
+        checkpointer.restore_latest((optimizer, model), param_filter)
+
+    # for epoch in range(epochs):
+    #     dataset = dataset.shuffle()
+    #     for batch in dataset.iter(batch_size, drop_last_batch=True):
+    #         tokens = batch["messages"]
+    #         loss = update_step(optimizer, model, tokens)
+    #         print(loss)
+
+    # del optimizer
+    # batch_size = 1
+    # seq_length = 2048
+    # chat(model, tokenizer, sampling, batch_size, seq_length, rngs)
 
 
 
