@@ -40,8 +40,10 @@ class LoRAGeneral(nnx.Module):
 
 
 class MlpLayer(nnx.Module):
-    def __init__(self, config: Config, lora_config: LoraConfig, *, rngs: nnx.Rngs):
+    def __init__(self, config: Config, *, rngs: nnx.Rngs):
         super().__init__()
+        self.config = config
+        self._has_lora = False
 
         self.up_gate = nnx.Linear(
             config.embed,
@@ -68,28 +70,29 @@ class MlpLayer(nnx.Module):
             rngs=rngs,
         )
 
-        self._use_lora = lora_config.mlp_lora
+    def initialize_lora(self, lora_config: LoraConfig, *, rngs: nnx.Rngs):
+        self._has_lora = lora_config.mlp_lora
         if lora_config.mlp_lora:
             self.up_gate_lora = nnx.LoRA(
-                config.embed,
+                self.config.embed,
                 lora_config.rank,
-                config.mlp_ffw_size,
+                self.config.mlp_ffw_size,
                 dtype=jnp.bfloat16,
                 param_dtype=jnp.bfloat16,
                 rngs=rngs,
             )
             self.up_proj_lora = nnx.LoRA(
-                config.embed,
+                self.config.embed,
                 lora_config.rank,
-                config.mlp_ffw_size,
+                self.config.mlp_ffw_size,
                 dtype=jnp.bfloat16,
                 param_dtype=jnp.bfloat16,
                 rngs=rngs,
             )
             self.down_proj_lora = nnx.LoRA(
-                config.mlp_ffw_size,
+                self.config.mlp_ffw_size,
                 lora_config.rank,
-                config.embed,
+                self.config.embed,
                 dtype=jnp.bfloat16,
                 param_dtype=jnp.bfloat16,
                 rngs=rngs,
@@ -105,14 +108,14 @@ class MlpLayer(nnx.Module):
         up = self.up_proj(inputs)
         gate_in = self.up_gate(inputs)
 
-        if self._use_lora:
+        if self._has_lora:
             up = up + self.up_proj_lora(inputs)
             gate_in = gate_in + self.up_gate_lora(inputs)
         
         down_in = up * jax.nn.silu(gate_in)
         out = self.down_proj(down_in)
 
-        if self._use_lora:
+        if self._has_lora:
             out = out + self.down_proj_lora(down_in)
 
         return out
@@ -125,8 +128,10 @@ class KVCache(NamedTuple):
     
 
 class AttentionLayer(nnx.Module):
-    def __init__(self, config: Config, lora_config: LoraConfig, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: Config, *, rngs: nnx.Rngs) -> None:
         super().__init__()
+        self.config = config
+        self._has_lora = False
 
         self._num_kv_heads = config.kv_heads
         self._head_dim = config.head_dim
@@ -180,34 +185,33 @@ class AttentionLayer(nnx.Module):
             rngs=rngs,
         )
 
-        self._use_lora = lora_config.attn_lora
-
-        if self._use_lora:
+    def initialize_lora(self, lora_config: LoraConfig, *, rngs: nnx.Rngs):
+        self._has_lora = lora_config.attn_lora
+        if self._has_lora:
             self.key_proj_lora = LoRAGeneral(
-                config.embed,
+                self.config.embed,
                 lora_config.rank,
-                (config.kv_heads, config.head_dim),
+                (self.config.kv_heads, self.config.head_dim),
                 rngs=rngs,
             )
             self.value_proj_lora = LoRAGeneral(
-                config.embed,
+                self.config.embed,
                 lora_config.rank,
-                (config.kv_heads, config.head_dim),
+                (self.config.kv_heads, self.config.head_dim),
                 rngs=rngs,
             )
             self.query_proj_lora = LoRAGeneral(
-                config.embed,
+                self.config.embed,
                 lora_config.rank,
-                (config.q_heads, config.head_dim),
+                (self.config.q_heads, self.config.head_dim),
                 rngs=rngs,
             )
             self.out_lora = LoRAGeneral(
-                (config.q_heads, config.head_dim),
+                (self.config.q_heads, self.config.head_dim),
                 lora_config.rank,
-                config.embed,
+                self.config.embed,
                 rngs=rngs,
             )
-
 
     def initialize_carry(self, batch_size: int, seq_length: int):
         shape = (batch_size, seq_length, self._num_kv_heads, self._head_dim)
@@ -244,7 +248,7 @@ class AttentionLayer(nnx.Module):
         value = self.value_proj(inputs)
         query = self.query_proj(inputs)
 
-        if self._use_lora:
+        if self._has_lora:
             key = key + self.key_proj_lora(inputs)
             value = value + self.value_proj_lora(inputs)
             query = query + self.query_proj_lora(inputs)
@@ -275,7 +279,7 @@ class AttentionLayer(nnx.Module):
             )
 
         out = self.out(x)
-        if self._use_lora:
+        if self._has_lora:
             out = out + self.out_lora(x)
 
         return out, carry
@@ -299,13 +303,12 @@ class Qwen3Layer(nnx.Module):
     def __init__(
         self,
         config: Config,
-        lora_config: LoraConfig,
         *,
         rngs: nnx.Rngs
     ):
         super().__init__()
-        self.attn = AttentionLayer(config, lora_config, rngs=rngs)
-        self.mlp = MlpLayer(config, lora_config, rngs=rngs)
+        self.attn = AttentionLayer(config, rngs=rngs)
+        self.mlp = MlpLayer(config, rngs=rngs)
 
         self.attn_pre_norm = nnx.RMSNorm(
             config.embed,
@@ -321,6 +324,10 @@ class Qwen3Layer(nnx.Module):
             epsilon=config.norm_eps,
             rngs=rngs,
         )
+
+    def initialize_lora(self, lora_config: LoraConfig, *, rngs: nnx.Rngs):
+        self.attn.initialize_lora(lora_config, rngs=rngs)
+        self.mlp.initialize_lora(lora_config, rngs=rngs)
 
     def __call__(self, inputs: jax.Array, positions: jax.Array, carry: KVCache | None = None) -> tuple[jax.Array, KVCache | None]:
         attn_in = self.attn_pre_norm(inputs)
@@ -347,7 +354,6 @@ class Qwen3(nnx.Module):
     def __init__(
         self,
         config: Config,
-        lora_config: LoraConfig,
         *,
         rngs: nnx.Rngs,
     ):
@@ -362,7 +368,6 @@ class Qwen3(nnx.Module):
             layers.append(
                 Qwen3Layer(
                     config=config,
-                    lora_config=lora_config,
                     rngs=rngs,
                 )
             )
@@ -375,6 +380,10 @@ class Qwen3(nnx.Module):
             param_dtype=jnp.bfloat16,
             rngs=rngs,
         )
+
+    def initialize_lora(self, lora_config: LoraConfig, *, rngs: nnx.Rngs):
+        for layer in self.layers:
+            layer.initialize_lora(lora_config, rngs=rngs)
         
     def load_params(self, params: dict[str, Any]):
         embed_params = jnp.asarray(
