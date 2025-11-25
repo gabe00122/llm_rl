@@ -9,7 +9,7 @@ import optax
 # from tokenizers import Tokenizer
 from transformers import PreTrainedTokenizerFast
 
-from llmrl.config import SamplingConfig, load_config, load_sampling_config
+from llmrl.config import LoraConfig, SamplingConfig, load_config, load_sampling_config
 from llmrl.model import Qwen3
 from llmrl.util import load_tokenizer
 from llmrl.checkpoint import load_model, load_safetensors
@@ -175,8 +175,9 @@ def chat(model: Qwen3, tokenizer, sampling, batch_size: int, seq_length: int, rn
 def main():
     # model_path = "./base-models/qwen3-0.6b"
     model_path = "./base-models/Qwen3-4B-Instruct-2507"
+    lora_config = LoraConfig(False, False, 0)
     rngs = nnx.Rngs(0)
-    model, tokenizer, sampling = load_model(model_path, rngs)
+    model, tokenizer, sampling = load_model(model_path, lora_config, rngs)
 
     batch_size = 1
     seq_length = 16384 #512
