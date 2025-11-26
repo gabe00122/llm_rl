@@ -1,33 +1,49 @@
-from typing import Any, NamedTuple
 import math
+from typing import Any, NamedTuple
 
 import jax
-from jax import numpy as jnp
 from flax import nnx
-from llmrl.config import Config, LoraConfig
+from jax import numpy as jnp
 
+from llmrl.config import Config, LoraConfig
 from llmrl.rope import apply_rope
 
 
 def _load_param(target: nnx.Param[jax.Array], value):
-    value = jnp.asarray(value, device=target.value.device)
-    assert value.shape == target.value.shape
-    assert value.dtype == target.value.dtype
-    target.value = value
+    value = jnp.asarray(value, device=target.device)
+    assert value.shape == target.shape
+    assert value.dtype == target.dtype
+    target[...] = value
 
 
 class LoRAGeneral(nnx.Module):
-    def __init__(self, in_features: int | tuple[int, ...], rank: int, out_features: int | tuple[int, ...], *, rngs: nnx.Rngs) -> None:
+    def __init__(
+        self,
+        in_features: int | tuple[int, ...],
+        rank: int,
+        out_features: int | tuple[int, ...],
+        *,
+        rngs: nnx.Rngs,
+    ) -> None:
         def prod_features(feat):
             return feat if isinstance(feat, int) else math.prod(feat)
-        
+
         prod_in = prod_features(in_features)
         prod_out = prod_features(out_features)
 
-        self._out_shape = (out_features,) if isinstance(out_features, int) else out_features
+        self._out_shape = (
+            (out_features,) if isinstance(out_features, int) else out_features
+        )
 
-        self.lora = nnx.LoRA(prod_in, rank, prod_out, dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, rngs=rngs)
-    
+        self.lora = nnx.LoRA(
+            prod_in,
+            rank,
+            prod_out,
+            dtype=jnp.bfloat16,
+            param_dtype=jnp.bfloat16,
+            rngs=rngs,
+        )
+
     def __call__(self, x: jax.Array) -> jax.Array:
         batch = x.shape[0]
         seq_length = x.shape[1]
@@ -40,8 +56,10 @@ class LoRAGeneral(nnx.Module):
 
 
 class MlpLayer(nnx.Module):
-    def __init__(self, config: Config, lora_config: LoraConfig, *, rngs: nnx.Rngs):
+    def __init__(self, config: Config, *, rngs: nnx.Rngs):
         super().__init__()
+        self._embed_dim = config.embed
+        self._ffw_dim = config.mlp_ffw_size
 
         self.up_gate = nnx.Linear(
             config.embed,
@@ -68,32 +86,38 @@ class MlpLayer(nnx.Module):
             rngs=rngs,
         )
 
-        self._use_lora = lora_config.mlp_lora
-        if lora_config.mlp_lora:
-            self.up_gate_lora = nnx.LoRA(
-                config.embed,
-                lora_config.rank,
-                config.mlp_ffw_size,
-                dtype=jnp.bfloat16,
-                param_dtype=jnp.bfloat16,
-                rngs=rngs,
-            )
-            self.up_proj_lora = nnx.LoRA(
-                config.embed,
-                lora_config.rank,
-                config.mlp_ffw_size,
-                dtype=jnp.bfloat16,
-                param_dtype=jnp.bfloat16,
-                rngs=rngs,
-            )
-            self.down_proj_lora = nnx.LoRA(
-                config.mlp_ffw_size,
-                lora_config.rank,
-                config.embed,
-                dtype=jnp.bfloat16,
-                param_dtype=jnp.bfloat16,
-                rngs=rngs,
-            )
+        self._use_lora = False
+
+    def initialize_lora(self, lora_config: LoraConfig, *, rngs: nnx.Rngs):
+        if not lora_config.mlp_lora:
+            self._use_lora = False
+            return
+
+        self._use_lora = True
+        self.up_gate_lora = nnx.LoRA(
+            self._embed_dim,
+            lora_config.rank,
+            self._ffw_dim,
+            dtype=jnp.bfloat16,
+            param_dtype=jnp.bfloat16,
+            rngs=rngs,
+        )
+        self.up_proj_lora = nnx.LoRA(
+            self._embed_dim,
+            lora_config.rank,
+            self._ffw_dim,
+            dtype=jnp.bfloat16,
+            param_dtype=jnp.bfloat16,
+            rngs=rngs,
+        )
+        self.down_proj_lora = nnx.LoRA(
+            self._ffw_dim,
+            lora_config.rank,
+            self._embed_dim,
+            dtype=jnp.bfloat16,
+            param_dtype=jnp.bfloat16,
+            rngs=rngs,
+        )
 
     def load_params(self, params):
         # pass in the mlp dict
@@ -108,7 +132,7 @@ class MlpLayer(nnx.Module):
         if self._use_lora:
             up = up + self.up_proj_lora(inputs)
             gate_in = gate_in + self.up_gate_lora(inputs)
-        
+
         down_in = up * jax.nn.silu(gate_in)
         out = self.down_proj(down_in)
 
@@ -116,26 +140,29 @@ class MlpLayer(nnx.Module):
             out = out + self.down_proj_lora(down_in)
 
         return out
-    
+
 
 class KVCache(NamedTuple):
     key: jax.Array
     value: jax.Array
     # length: jax.Array
-    
+
 
 class AttentionLayer(nnx.Module):
-    def __init__(self, config: Config, lora_config: LoraConfig, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: Config, *, rngs: nnx.Rngs) -> None:
         super().__init__()
 
         self._num_kv_heads = config.kv_heads
+        self._q_heads = config.q_heads
+        self._embed_dim = config.embed
         self._head_dim = config.head_dim
         self._rope_theta = config.rope_theta
 
         self.key_proj = nnx.LinearGeneral(
             in_features=config.embed,
             out_features=(config.kv_heads, config.head_dim),
-            dtype=jnp.bfloat16, param_dtype=jnp.bfloat16,
+            dtype=jnp.bfloat16,
+            param_dtype=jnp.bfloat16,
             use_bias=False,
             rngs=rngs,
         )
@@ -143,7 +170,8 @@ class AttentionLayer(nnx.Module):
         self.value_proj = nnx.LinearGeneral(
             in_features=config.embed,
             out_features=(config.kv_heads, config.head_dim),
-            dtype=jnp.bfloat16, param_dtype=jnp.bfloat16,
+            dtype=jnp.bfloat16,
+            param_dtype=jnp.bfloat16,
             use_bias=False,
             rngs=rngs,
         )
@@ -151,7 +179,8 @@ class AttentionLayer(nnx.Module):
         self.query_proj = nnx.LinearGeneral(
             in_features=config.embed,
             out_features=(config.q_heads, config.head_dim),
-            dtype=jnp.bfloat16, param_dtype=jnp.bfloat16,
+            dtype=jnp.bfloat16,
+            param_dtype=jnp.bfloat16,
             use_bias=False,
             rngs=rngs,
         )
@@ -160,11 +189,12 @@ class AttentionLayer(nnx.Module):
             in_features=(config.q_heads, config.head_dim),
             out_features=config.embed,
             axis=(-2, -1),
-            dtype=jnp.bfloat16, param_dtype=jnp.bfloat16,
+            dtype=jnp.bfloat16,
+            param_dtype=jnp.bfloat16,
             use_bias=False,
             rngs=rngs,
         )
-        
+
         self.query_norm = nnx.RMSNorm(
             config.head_dim,
             dtype=jnp.bfloat16,
@@ -180,34 +210,38 @@ class AttentionLayer(nnx.Module):
             rngs=rngs,
         )
 
-        self._use_lora = lora_config.attn_lora
+        self._use_lora = False
 
-        if self._use_lora:
-            self.key_proj_lora = LoRAGeneral(
-                config.embed,
-                lora_config.rank,
-                (config.kv_heads, config.head_dim),
-                rngs=rngs,
-            )
-            self.value_proj_lora = LoRAGeneral(
-                config.embed,
-                lora_config.rank,
-                (config.kv_heads, config.head_dim),
-                rngs=rngs,
-            )
-            self.query_proj_lora = LoRAGeneral(
-                config.embed,
-                lora_config.rank,
-                (config.q_heads, config.head_dim),
-                rngs=rngs,
-            )
-            self.out_lora = LoRAGeneral(
-                (config.q_heads, config.head_dim),
-                lora_config.rank,
-                config.embed,
-                rngs=rngs,
-            )
+    def initialize_lora(self, lora_config: LoraConfig, *, rngs: nnx.Rngs):
+        if not lora_config.attn_lora:
+            self._use_lora = False
+            return
 
+        self._use_lora = True
+        self.key_proj_lora = LoRAGeneral(
+            self._embed_dim,
+            lora_config.rank,
+            (self._num_kv_heads, self._head_dim),
+            rngs=rngs,
+        )
+        self.value_proj_lora = LoRAGeneral(
+            self._embed_dim,
+            lora_config.rank,
+            (self._num_kv_heads, self._head_dim),
+            rngs=rngs,
+        )
+        self.query_proj_lora = LoRAGeneral(
+            self._embed_dim,
+            lora_config.rank,
+            (self._q_heads, self._head_dim),
+            rngs=rngs,
+        )
+        self.out_lora = LoRAGeneral(
+            (self._q_heads, self._head_dim),
+            lora_config.rank,
+            self._embed_dim,
+            rngs=rngs,
+        )
 
     def initialize_carry(self, batch_size: int, seq_length: int):
         shape = (batch_size, seq_length, self._num_kv_heads, self._head_dim)
@@ -215,8 +249,14 @@ class AttentionLayer(nnx.Module):
         value = jnp.zeros(shape, dtype=jnp.bfloat16)
 
         return KVCache(key, value)
-    
-    def _update_carry(self, carry: KVCache, positions: jax.Array, key_update: jax.Array, value_update: jax.Array) -> KVCache:
+
+    def _update_carry(
+        self,
+        carry: KVCache,
+        positions: jax.Array,
+        key_update: jax.Array,
+        value_update: jax.Array,
+    ) -> KVCache:
         scatter_indices = positions
 
         dnums = jax.lax.ScatterDimensionNumbers(
@@ -228,18 +268,25 @@ class AttentionLayer(nnx.Module):
         )
 
         new_key = jax.lax.scatter(
-            carry.key, scatter_indices, key_update.squeeze(1), dnums,
+            carry.key,
+            scatter_indices,
+            key_update.squeeze(1),
+            dnums,
             unique_indices=True,
         )
         new_value = jax.lax.scatter(
-            carry.value, scatter_indices, value_update.squeeze(1), dnums,
+            carry.value,
+            scatter_indices,
+            value_update.squeeze(1),
+            dnums,
             unique_indices=True,
         )
 
         return KVCache(new_key, new_value)
 
-
-    def __call__(self, inputs: jax.Array, positions: jax.Array, carry: KVCache | None = None) -> tuple[jax.Array, KVCache | None]:
+    def __call__(
+        self, inputs: jax.Array, positions: jax.Array, carry: KVCache | None = None
+    ) -> tuple[jax.Array, KVCache | None]:
         key = self.key_proj(inputs)
         value = self.value_proj(inputs)
         query = self.query_proj(inputs)
@@ -281,10 +328,10 @@ class AttentionLayer(nnx.Module):
         return out, carry
 
     def load_params(self, params):
-        k_proj = params["k_proj"]["weight"].T.reshape(self.key_proj.kernel.value.shape)
-        q_proj = params["q_proj"]["weight"].T.reshape(self.query_proj.kernel.value.shape)
-        v_proj = params["v_proj"]["weight"].T.reshape(self.value_proj.kernel.value.shape)
-        o_proj = params["o_proj"]["weight"].T.reshape(self.out.kernel.value.shape)
+        k_proj = params["k_proj"]["weight"].T.reshape(self.key_proj.kernel.shape)
+        q_proj = params["q_proj"]["weight"].T.reshape(self.query_proj.kernel.shape)
+        v_proj = params["v_proj"]["weight"].T.reshape(self.value_proj.kernel.shape)
+        o_proj = params["o_proj"]["weight"].T.reshape(self.out.kernel.shape)
 
         _load_param(self.key_proj.kernel, k_proj)
         _load_param(self.query_proj.kernel, q_proj)
@@ -296,16 +343,10 @@ class AttentionLayer(nnx.Module):
 
 
 class Qwen3Layer(nnx.Module):
-    def __init__(
-        self,
-        config: Config,
-        lora_config: LoraConfig,
-        *,
-        rngs: nnx.Rngs
-    ):
+    def __init__(self, config: Config, *, rngs: nnx.Rngs):
         super().__init__()
-        self.attn = AttentionLayer(config, lora_config, rngs=rngs)
-        self.mlp = MlpLayer(config, lora_config, rngs=rngs)
+        self.attn = AttentionLayer(config, rngs=rngs)
+        self.mlp = MlpLayer(config, rngs=rngs)
 
         self.attn_pre_norm = nnx.RMSNorm(
             config.embed,
@@ -322,7 +363,13 @@ class Qwen3Layer(nnx.Module):
             rngs=rngs,
         )
 
-    def __call__(self, inputs: jax.Array, positions: jax.Array, carry: KVCache | None = None) -> tuple[jax.Array, KVCache | None]:
+    def initialize_lora(self, lora_config: LoraConfig, *, rngs: nnx.Rngs):
+        self.attn.initialize_lora(lora_config, rngs=rngs)
+        self.mlp.initialize_lora(lora_config, rngs=rngs)
+
+    def __call__(
+        self, inputs: jax.Array, positions: jax.Array, carry: KVCache | None = None
+    ) -> tuple[jax.Array, KVCache | None]:
         attn_in = self.attn_pre_norm(inputs)
         attn_out, carry = self.attn(attn_in, positions, carry)
         x = inputs + attn_out
@@ -332,13 +379,15 @@ class Qwen3Layer(nnx.Module):
         x = x + ff_out
 
         return x, carry
-    
+
     def initialize_carry(self, batch_size: int, seq_length: int):
         return self.attn.initialize_carry(batch_size, seq_length)
 
     def load_params(self, params):
         _load_param(self.attn_pre_norm.scale, params["input_layernorm"]["weight"])
-        _load_param(self.attn_post_norm.scale, params["post_attention_layernorm"]["weight"])
+        _load_param(
+            self.attn_post_norm.scale, params["post_attention_layernorm"]["weight"]
+        )
         self.attn.load_params(params["self_attn"])
         self.mlp.load_params(params["mlp"])
 
@@ -347,7 +396,6 @@ class Qwen3(nnx.Module):
     def __init__(
         self,
         config: Config,
-        lora_config: LoraConfig,
         *,
         rngs: nnx.Rngs,
     ):
@@ -355,14 +403,19 @@ class Qwen3(nnx.Module):
         self._head_dim = config.head_dim
         self._rope_theta = config.rope_theta
 
-        self.embeddings = nnx.Embed(config.vocab_size, config.embed, dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, rngs=rngs)
+        self.embeddings = nnx.Embed(
+            config.vocab_size,
+            config.embed,
+            dtype=jnp.bfloat16,
+            param_dtype=jnp.bfloat16,
+            rngs=rngs,
+        )
 
         layers = []
         for _ in range(config.num_layers):
             layers.append(
                 Qwen3Layer(
                     config=config,
-                    lora_config=lora_config,
                     rngs=rngs,
                 )
             )
@@ -375,24 +428,31 @@ class Qwen3(nnx.Module):
             param_dtype=jnp.bfloat16,
             rngs=rngs,
         )
-        
+
+    def initialize_lora(self, lora_config: LoraConfig, *, rngs: nnx.Rngs):
+        for layer in self.layers:
+            layer.initialize_lora(lora_config, rngs=rngs)
+
     def load_params(self, params: dict[str, Any]):
         embed_params = jnp.asarray(
-            params['model']['embed_tokens']['weight'],
-            device=self.embeddings.embedding.value.device
+            params["model"]["embed_tokens"]["weight"],
+            device=self.embeddings.embedding.device,
         )
-        assert embed_params.shape == self.embeddings.embedding.value.shape
+        assert embed_params.shape == self.embeddings.embedding.shape
 
-        self.embeddings.embedding.value = embed_params
+        self.embeddings.embedding[...] = embed_params
 
         for i, layer in enumerate(self.layers):
             layer_params = params["model"]["layers"][f"{i}"]
             layer.load_params(layer_params)
-        
+
         _load_param(self.final_norm.scale, params["model"]["norm"]["weight"])
 
     def __call__(
-        self, tokens: jax.Array, positions: jax.Array, carry: tuple[KVCache, ...] | None=None
+        self,
+        tokens: jax.Array,
+        positions: jax.Array,
+        carry: tuple[KVCache, ...] | None = None,
     ) -> tuple[jax.Array, tuple[KVCache, ...] | None]:
         x = self.embeddings(tokens)
 
@@ -405,13 +465,15 @@ class Qwen3(nnx.Module):
         else:
             for layer in self.layers:
                 x, _ = layer(x, positions)
-        
+
         x = self.final_norm(x)
-        logits = x @ self.embeddings.embedding.value.T
+        logits = x @ self.embeddings.embedding.T
 
         logits = logits.astype(jnp.float32)
 
         return logits, carry
 
     def initialize_carry(self, batch_size: int, seq_length: int):
-        return tuple(layer.initialize_carry(batch_size, seq_length) for layer in self.layers)
+        return tuple(
+            layer.initialize_carry(batch_size, seq_length) for layer in self.layers
+        )

@@ -1,4 +1,6 @@
+import math
 import random
+import re
 
 import numpy as np
 
@@ -10,10 +12,11 @@ class BasicArithmeticEnv:
         self._max = 10000
         self._min = 0
         self._rngs = random.Random()
+        self._ops = ["+", "-", "*", "/"]
 
     def instructions(self) -> str:
         return """
-Please complete the following math expression, you can show your work if needed but the final output should simply be the result on a new line of it's own.
+Solve the arithmetic expression using +, -, * or /. Show your work if needed, but end with only the numeric result on its own line.
 """
 
     def step(self, action: Action):
@@ -23,14 +26,10 @@ Please complete the following math expression, you can show your work if needed 
             try:
                 print(action_text)
                 print("-----")
-                answer = action_text.split()[-1].replace(",", "").replace(".", "")
-                correct = int(answer) == self._result
-
+                answer = self._parse_answer(action_text)
+                correct = math.isclose(answer, self._result, rel_tol=1e-4, abs_tol=1e-4)
                 print(f"{self._result} == {answer}")
             except ValueError:
-                correct = False
-                print("Invalid input")
-            except IndexError:
                 correct = False
                 print("Invalid input")
 
@@ -39,11 +38,42 @@ Please complete the following math expression, you can show your work if needed 
 
         return TimeStep([""], rewards)
 
-    def reset(self) -> TimeStep:
-        a = self._rngs.randint(0, 10000)
-        b = self._rngs.randint(0, 10000)
-        self._result = a + b
+    def _parse_answer(self, action_text: str) -> float:
+        # Take the last numeric token so the agent can show work before giving the answer.
+        numbers = re.findall(r"[-+]?\d[\d,]*(?:\.\d+)?", action_text)
+        if not numbers:
+            raise ValueError("No numeric answer found")
 
-        obs = f"{a} + {b} = ..."
+        normalized = numbers[-1].replace(",", "")
+        return float(normalized)
+
+    def _sample_problem(self) -> tuple[int, int, str, float]:
+        op = self._rngs.choice(self._ops)
+
+        if op == "+":
+            a = self._rngs.randint(self._min, self._max)
+            b = self._rngs.randint(self._min, self._max)
+            result = a + b
+        elif op == "-":
+            a = self._rngs.randint(self._min, self._max)
+            b = self._rngs.randint(self._min, self._max)
+            result = a - b
+        elif op == "*":
+            a = self._rngs.randint(self._min, self._max)
+            b = self._rngs.randint(self._min, self._max)
+            result = a * b
+        else:  # Division
+            b = self._rngs.randint(1, 12)
+            max_result = max(self._min, self._max // b)
+            result = self._rngs.randint(self._min, max_result)
+            a = result * b
+
+        return a, b, op, float(result)
+
+    def reset(self) -> TimeStep:
+        a, b, op, result = self._sample_problem()
+        self._result = result
+
+        obs = f"{a} {op} {b} = ..."
 
         return TimeStep([obs], np.array(0.0))

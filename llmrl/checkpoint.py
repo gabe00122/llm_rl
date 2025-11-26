@@ -52,7 +52,8 @@ def load_model(model_path: str, lora_config: LoraConfig, rngs: nnx.Rngs):
     tokenizer = load_tokenizer(model_path)
     sampling = load_sampling_config(f"{model_path}/generation_config.json")
 
-    model = Qwen3(config, lora_config, rngs=rngs)
+    model = Qwen3(config, rngs=rngs)
+    model.initialize_lora(lora_config, rngs=rngs)
     model.load_params(params)
     
     return model, tokenizer, sampling
