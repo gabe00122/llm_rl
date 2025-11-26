@@ -2,7 +2,7 @@ from typing import Any
 
 from litellm import completion
 
-from llmrl.types import Action, TimeStep
+from llmrl.rl_types import Action, TimeStep
 
 
 class LiteAgent:

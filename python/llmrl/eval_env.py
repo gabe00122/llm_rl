@@ -1,10 +1,15 @@
-from litellm.integrations.arize.arize_phoenix import os
+import os
 
+from llmrl._envs import ArithmaticEnv
 from llmrl.agent.lite import LiteAgent
 from llmrl.env.basic_arithmatic import BasicArithmeticEnv
 
 
 def main():
+    env = ArithmaticEnv()
+    print(env.reset())
+
+    return
     os.environ["LM_STUDIO_API_BASE"] = ""
 
     env = BasicArithmeticEnv()
@@ -15,7 +20,7 @@ def main():
     )
 
     total_reward = 0
-    iterations = 100
+    iterations = 1
 
     for _ in range(iterations):
         agent.reset()

@@ -3,8 +3,7 @@ import random
 import re
 
 import numpy as np
-
-from llmrl.types import Action, TimeStep
+from llmrl.rl_types import Action, TimeStep
 
 
 class BasicArithmeticEnv:

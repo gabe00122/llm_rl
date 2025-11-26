@@ -14,3 +14,6 @@ base-models/
 
 checkpoints/
 
+# Rust
+target
+*.so
