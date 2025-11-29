@@ -40,8 +40,8 @@ def sample(config: SamplingConfig, logits, rng_key):
     V = logits.shape[-1]
     k = min(config.top_k, V)
 
-    logits = logits / config.temperature
     topk_logits, topk_idx = jax.lax.top_k(logits, k)  # (..., k)
+    topk_logits = topk_logits / config.temperature
 
     topk_probs = jax.nn.softmax(topk_logits, axis=-1)  # (..., k)
 
