@@ -1,19 +1,19 @@
-from datasets import load_dataset
 import jax
-from jax import numpy as jnp
-from flax import nnx
 import optax
-
+from datasets import load_dataset
+from flax import nnx
+from jax import numpy as jnp
+from llmrl.chat import PAD_ID, chat, encode_input
 from llmrl.checkpoint import Checkpointer, load_model
 from llmrl.config import LoraConfig
-from llmrl.main import PAD_ID, chat, encode_input
 from llmrl.model import Qwen3
 
+
 def create_conversation(tokenizer, sample, pad_size: int):
-    messages = [[
-        {"role": "user", "content": user},
-        {"role": "assistant", "content": assistant}
-    ] for user, assistant in zip(sample["player"], sample["alien"])]
+    messages = [
+        [{"role": "user", "content": user}, {"role": "assistant", "content": assistant}]
+        for user, assistant in zip(sample["player"], sample["alien"])
+    ]
 
     tokens = encode_input(tokenizer, messages, pad_size)
     return {"messages": tokens}
@@ -57,7 +57,11 @@ def main():
 
     npc_type = "venusian"
     dataset = load_dataset("bebechien/MobileGameNPC", npc_type, split="train")
-    dataset = dataset.map(lambda sample: create_conversation(tokenizer, sample, seq_length), remove_columns=dataset.features, batched=True)
+    dataset = dataset.map(
+        lambda sample: create_conversation(tokenizer, sample, seq_length),
+        remove_columns=dataset.features,
+        batched=True,
+    )
     dataset = dataset.with_format("jax")
 
     checkpointer = Checkpointer("./checkpoints/test")
@@ -91,7 +95,6 @@ def main():
     # batch_size = 1
     # seq_length = 2048
     # chat(model, tokenizer, sampling, batch_size, seq_length, rngs)
-
 
 
 if __name__ == "__main__":

@@ -1,0 +1,6 @@
+from typing import Iterable, Protocol
+
+
+class Agent(Protocol):
+    def reset(self): ...
+    def act(self, obs: Iterable[str]) -> list[str]: ...
