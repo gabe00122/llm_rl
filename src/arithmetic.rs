@@ -1,5 +1,7 @@
 extern crate rand;
 
+use std::iter::zip;
+
 use pyo3::prelude::*;
 use rand::{distr::Uniform, prelude::*};
 use regex::Regex;
@@ -12,14 +14,18 @@ pub enum Operator {
     Div,
 }
 
-#[pyclass]
-pub struct ArithmaticEnv {
-    number_re: Regex,
-    rng: SmallRng,
+struct ArithmeticEnvInstance {
     op: Operator,
     x: f32,
     y: f32,
     result: f32,
+}
+
+#[pyclass]
+pub struct ArithmeticEnv {
+    number_re: Regex,
+    rng: SmallRng,
+    envs: Vec<ArithmeticEnvInstance>
 }
 
 fn sample_op(rng: &mut impl Rng) -> Operator {
@@ -59,13 +65,9 @@ fn parse_response(re: &Regex, text: &str) -> Option<f32> {
     }
 }
 
-#[pymethods]
-impl ArithmaticEnv {
-    #[new]
+impl ArithmeticEnvInstance {
     fn new() -> Self {
-        ArithmaticEnv {
-            number_re: Regex::new(r"[\d,]+(?:\.\d*)?").unwrap(),
-            rng: SmallRng::seed_from_u64(1),
+        ArithmeticEnvInstance {
             op: Operator::Add,
             x: 0.0,
             y: 0.0,
@@ -73,11 +75,11 @@ impl ArithmaticEnv {
         }
     }
 
-    fn reset(&mut self) -> PyResult<String> {
+    fn reset(&mut self, rng: &mut impl Rng) -> String {
         let dist = Uniform::new(0.0, 10000.0).unwrap();
-        let x: f32 = self.rng.sample::<f32, _>(dist).round();
-        let y: f32 = self.rng.sample::<f32, _>(dist).round();
-        let op = sample_op(&mut self.rng);
+        let x: f32 = rng.sample::<f32, _>(dist).round();
+        let y: f32 = rng.sample::<f32, _>(dist).round();
+        let op = sample_op(rng);
 
         self.x = x;
         self.y = y;
@@ -87,11 +89,11 @@ impl ArithmaticEnv {
         let op_prompt = op_str(op);
         let prompt = format!("{x} {op_prompt} {y} = ...");
 
-        Ok(prompt)
+        prompt
     }
 
-    fn step(&self, action: &str) -> PyResult<(String, f32)> {
-        let parsed = parse_response(&self.number_re, action);
+    fn step(&self, action: &str, number_regex: &Regex) -> (String, f32) {
+        let parsed = parse_response(number_regex, action);
 
         let corrected = if let Some(p) = parsed {
             (p - self.result).abs() < 0.001
@@ -100,7 +102,40 @@ impl ArithmaticEnv {
         };
         let reward = if corrected { 1.0 } else { 0.0 };
 
-        Ok((String::new(), reward))
+        (String::new(), reward)
+    }
+}
+
+#[pymethods]
+impl ArithmeticEnv {
+    #[new]
+    fn new(num_agents: i32) -> Self {
+        let envs = (0..num_agents)
+            .map(|_| ArithmeticEnvInstance::new())
+            .collect();
+
+        ArithmeticEnv {
+            number_re: Regex::new(r"[\d,]+(?:\.\d*)?").unwrap(),
+            rng: SmallRng::seed_from_u64(1),
+            envs,
+        }
+    }
+
+    fn reset(&mut self) -> PyResult<Vec<String>> {
+        let result = self.envs
+            .iter_mut()
+            .map(|env| env.reset(&mut self.rng))
+            .collect();
+
+        Ok(result)
+    }
+
+    fn step(&self, actions: Vec<String>) -> PyResult<Vec<(String, f32)>> {
+        let result = zip(&self.envs, &actions)
+            .map(|(env, action)| env.step(action, &self.number_re))
+            .collect();
+
+        Ok(result)
     }
 
     fn instructions(&self) -> PyResult<&'static str> {

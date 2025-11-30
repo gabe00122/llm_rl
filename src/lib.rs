@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
 
-mod arithmatic;
+mod arithmetic;
 
 /// Formats the sum of two numbers as string.
 #[pyfunction]
@@ -12,6 +12,6 @@ fn sum_as_string(a: usize, b: usize) -> PyResult<String> {
 #[pymodule]
 fn _envs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;
-    m.add_class::<arithmatic::ArithmaticEnv>()?;
+    m.add_class::<arithmetic::ArithmeticEnv>()?;
     Ok(())
 }

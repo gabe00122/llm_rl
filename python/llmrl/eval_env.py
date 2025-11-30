@@ -1,14 +1,19 @@
 import os
 
 import numpy as np
-from llmrl._envs import ArithmaticEnv
+from llmrl._envs import ArithmeticEnv
 from llmrl.agent.lite import LiteAgent
-from llmrl.env.basic_arithmatic import BasicArithmeticEnv
+# from llmrl.env.basic_arithmetic import BasicArithmeticEnv
 from llmrl.types import TimeStep
 
 
 def main():
-    env = ArithmaticEnv()
+    env = ArithmeticEnv(4)
+
+    print(env.reset())
+    print(env.step(["one", "two", "three", "four"]))
+
+    return
 
     os.environ["LM_STUDIO_API_BASE"] = ""
 
