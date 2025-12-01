@@ -3,8 +3,10 @@ from typing import Any, Iterable, override
 import jax
 import numpy as np
 from jax import numpy as jnp
+from flax import nnx
+
 from llmrl.agent.base import Agent
-from llmrl.chat import encode_input, generate
+from llmrl.chat import encode_input, generate, get_last_turn
 from llmrl.config import SamplingConfig
 from llmrl.model import Qwen3
 from transformers import PreTrainedTokenizerFast
@@ -30,13 +32,13 @@ class LocalAgent(Agent):
 
         self._rng_key = rng_key
 
-    @override
-    def reset(self):
-        self._messages: list[list[Any]] = [[] for _ in range(self._agent_count)]
-
         self._kv_cache = self._model.initialize_carry(
             self._agent_count, self._max_context_length
         )
+
+    @override
+    def reset(self):
+        self._messages: list[list[Any]] = [[] for _ in range(self._agent_count)]
         self._positions = jnp.zeros((self._agent_count,), dtype=jnp.int32)
 
     @override
@@ -51,7 +53,7 @@ class LocalAgent(Agent):
             self._tokenizer, self._messages, self._max_context_length
         )
 
-        input_length = self._positions.copy()
+        # input_length = self._positions.copy()
         self._kv_cache, self._positions, output, self._rng_key = generate(
             self._model,
             self._sampling_config,
@@ -61,15 +63,15 @@ class LocalAgent(Agent):
             self._rng_key,
         )
 
-        new_tokens = output[:, input_length:]
+        # new_tokens = output[:, input_length:]
         response: list[str] = self._tokenizer.batch_decode(
-            np.asarray(new_tokens), skip_special_tokens=True
+            np.asarray(output), skip_special_tokens=True
         )
 
         for messages, res in zip(self._messages, response):
             messages.append({
                 "role": "assistant",
-                "content": res
+                "content": get_last_turn(res)
             })
 
         return response

@@ -130,10 +130,10 @@ impl ArithmeticEnv {
         Ok(result)
     }
 
-    fn step(&self, actions: Vec<String>) -> PyResult<Vec<(String, f32)>> {
+    fn step(&self, actions: Vec<String>) -> PyResult<(Vec<String>, Vec<f32>)> {
         let result = zip(&self.envs, &actions)
             .map(|(env, action)| env.step(action, &self.number_re))
-            .collect();
+            .unzip();
 
         Ok(result)
     }
