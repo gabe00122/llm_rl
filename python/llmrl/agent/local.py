@@ -53,7 +53,6 @@ class LocalAgent(Agent):
             self._tokenizer, self._messages, self._max_context_length
         )
 
-        # input_length = self._positions.copy()
         self._kv_cache, self._positions, output, self._rng_key = generate(
             self._model,
             self._sampling_config,
@@ -63,10 +62,7 @@ class LocalAgent(Agent):
             self._rng_key,
         )
 
-        # new_tokens = output[:, input_length:]
-        response: list[str] = self._tokenizer.batch_decode(
-            np.asarray(output), skip_special_tokens=True
-        )
+        response: list[str] = self._tokenizer.batch_decode(np.asarray(output))
 
         for messages, res in zip(self._messages, response):
             messages.append({

@@ -8,7 +8,6 @@ from llmrl._envs import ArithmeticEnv
 from llmrl.env.base import Env
 from llmrl.agent.lite import LiteAgent
 # from llmrl.env.basic_arithmetic import BasicArithmeticEnv
-from llmrl.types import TimeStep
 from python.llmrl.agent.local import LocalAgent
 from python.llmrl.checkpoint import load_model
 from python.llmrl.config import LoraConfig
