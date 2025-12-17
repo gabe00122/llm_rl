@@ -17,3 +17,5 @@ checkpoints/
 # Rust
 target
 *.so
+.uv-cache
+

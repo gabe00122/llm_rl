@@ -443,7 +443,7 @@ class Qwen3(nnx.Module):
             rngs=rngs,
         )
 
-        self.value_net = ValueNetwork(config.embed, 512)
+        self.value_net = ValueNetwork(config.embed, 512, rngs=rngs)
 
     def initialize_lora(self, lora_config: LoraConfig, *, rngs: nnx.Rngs):
         for layer in self.layers:

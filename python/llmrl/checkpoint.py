@@ -44,9 +44,6 @@ def load_safetensors(file_path: str):
     return params
 
 def load_model(model_path: str, lora_config: LoraConfig, rngs: nnx.Rngs):
-    model_path = "./base-models/Qwen3-4B-Instruct-2507"
-
-    # model_path = "./base-models/qwen3-0.6b"
     config = load_config(f"{model_path}/config.json")
     params = load_safetensors(model_path)
     tokenizer = load_tokenizer(model_path)

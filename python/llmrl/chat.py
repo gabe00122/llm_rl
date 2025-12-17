@@ -28,7 +28,8 @@ def encode_input(tokenizer: PreTrainedTokenizerFast, conversations: list[list[di
         padding='max_length',
         max_length=pad_size,
         add_generation_prompt=True,
-        return_tensors='np'
+        return_tensors='np',
+        enable_thinking=False
     )
     return jnp.array(inputs)
 
@@ -90,7 +91,7 @@ def generate(
         rollout: RolloutState
     
     def cond(carry: GenerateCarry):
-        return jnp.logical_not(jnp.all(carry.finished))
+        return jnp.logical_not(jnp.any(carry.finished))
     
     def body(carry: GenerateCarry):
         logits, value, kv_cache = model(carry.next_tokens[..., None], carry.gen.positions[..., None], carry.gen.kv_cache)
@@ -203,8 +204,8 @@ def chat(console: Console, model: Qwen3, tokenizer, sampling, batch_size: int, s
 
 
 def main():
-    # model_path = "./base-models/qwen3-0.6b"
-    model_path = "./base-models/Qwen3-4B-Instruct-2507"
+    model_path = "./base-models/qwen3-0.6b"
+    # model_path = "./base-models/Qwen3-4B-Instruct-2507"
     lora_config = LoraConfig(False, False, 0)
     rngs = nnx.Rngs(0)
     model, tokenizer, sampling = load_model(model_path, lora_config, rngs)
