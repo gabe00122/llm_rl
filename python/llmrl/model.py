@@ -392,6 +392,20 @@ class Qwen3Layer(nnx.Module):
         self.mlp.load_params(params["mlp"])
 
 
+class ValueNetwork(nnx.Module):
+    def __init__(self, in_features: int, hidden_features: int, *, rngs: nnx.Rngs):
+        super().__init__()
+
+        self.up = nnx.Linear(in_features, hidden_features, dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, rngs=rngs)
+        self.down = nnx.Linear(hidden_features, 1, dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, rngs=rngs)        
+
+    def __call__(self, x):
+        x = self.up(x)
+        x = jax.nn.silu(x)
+        x = self.down(x)
+        return x
+
+
 class Qwen3(nnx.Module):
     def __init__(
         self,
@@ -428,6 +442,8 @@ class Qwen3(nnx.Module):
             param_dtype=jnp.bfloat16,
             rngs=rngs,
         )
+
+        self.value_net = ValueNetwork(config.embed, 512)
 
     def initialize_lora(self, lora_config: LoraConfig, *, rngs: nnx.Rngs):
         for layer in self.layers:
@@ -471,7 +487,9 @@ class Qwen3(nnx.Module):
 
         logits = logits.astype(jnp.float32)
 
-        return logits, carry
+        value = self.value_net(x)
+
+        return logits, value, carry
 
     def initialize_carry(self, batch_size: int, seq_length: int):
         return tuple(

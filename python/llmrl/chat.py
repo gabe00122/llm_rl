@@ -68,7 +68,6 @@ class GenerationState(NamedTuple):
 class RolloutState(NamedTuple):
     log_probs: jax.Array
     values: jax.Array
-    rewards: jax.Array
 
 
 @jax.jit(static_argnames=("model_def", "sampling"), donate_argnames=("gen", "rollout"))
@@ -94,7 +93,7 @@ def generate(
         return jnp.logical_not(jnp.all(carry.finished))
     
     def body(carry: GenerateCarry):
-        logits, kv_cache = model(carry.next_tokens[..., None], carry.gen.positions[..., None], carry.gen.kv_cache)
+        logits, value, kv_cache = model(carry.next_tokens[..., None], carry.gen.positions[..., None], carry.gen.kv_cache)
 
         sample_key, rng_key = jax.random.split(carry.gen.rng_key)
 
