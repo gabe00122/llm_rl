@@ -2,6 +2,7 @@ import time
 from typing import Any, Literal, NamedTuple, cast
 from jax import Array, numpy as jnp
 import numpy as np
+import numpy as np
 import jax
 from flax import nnx
 import optax
@@ -23,21 +24,31 @@ EOS_2 = 151643
 
 
 def encode_input(tokenizer: PreTrainedTokenizerFast, conversations: list[list[dict]] | list[dict], pad_size: int):
-    inputs = tokenizer.apply_chat_template(
+    info = tokenizer.apply_chat_template(
         conversations,
         padding='max_length',
         max_length=pad_size,
         add_generation_prompt=True,
+        return_dict=True,
         return_tensors='np',
-        enable_thinking=False
+        # enable_thinking=False
     )
-    return jnp.array(inputs)
+    seq_lengths = np.sum(info['attention_mask'], axis=1)
+    return jnp.array(info['input_ids']), jnp.asarray(seq_lengths)
 
 
 def get_last_turn(text: str) -> str:
     llm_response = text.split("<|im_start|>assistant\n")[-1]
     return llm_response.split("<|im_end|>")[0]
 
+
+def decode_responses(tokenizer: PreTrainedTokenizerFast, context: jax.Array, start: jax.Array, end: jax.Array) -> list[str]:
+    output = []
+    for b in range(context.shape[0]):
+        print(f"{start[b]}:{end[b]}")
+        output.append(tokenizer.decode(np.asarray(context[b, start[b]:end[b]])))
+
+    return output
 
 def sample(config: SamplingConfig, logits, rng_key):
     V = logits.shape[-1]
@@ -167,10 +178,10 @@ def chat(console: Console, model: Qwen3, tokenizer, sampling, batch_size: int, s
         conversations.append([])
 
     while True:
-        prompt = console.input("Prompt: ")
+        prompt = console.input("Prompt:\n")
 
         if prompt == "/clear":
-            positions = jnp.zeros((batch_size,), jnp.int32)
+            gen = gen._replace(positions=jnp.zeros((batch_size,), jnp.int32))
             conversations = []
             for _ in range(batch_size):
                 conversations.append([])
@@ -178,7 +189,7 @@ def chat(console: Console, model: Qwen3, tokenizer, sampling, batch_size: int, s
 
         for conv in conversations:
             conv.append({"role": "user", "content": prompt})
-        prompt_tokens = encode_input(tokenizer, conversations, seq_length)
+        prompt_tokens, prompt_length = encode_input(tokenizer, conversations, seq_length)
         
         gen = gen._replace(context=prompt_tokens)
         rollout = None #RolloutState()
@@ -188,9 +199,9 @@ def chat(console: Console, model: Qwen3, tokenizer, sampling, batch_size: int, s
 
         gen, rollout = generate(model_def, model_state, sampling, gen, rollout)
 
-        output_text: list[str] = tokenizer.batch_decode(np.asarray(gen.context))
+        output_text: list[str] = decode_responses(tokenizer, gen.context, prompt_length, gen.positions)
         for conv, out in zip(conversations, output_text):
-            assistant = get_last_turn(out)
+            assistant = out #get_last_turn(out)
             console.print("--------")
             console.print(Markdown(assistant))
             conv.append({"role": "assistant", "content": assistant})

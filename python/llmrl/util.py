@@ -12,6 +12,7 @@ def load_tokenizer(
     return AutoTokenizer.from_pretrained(tokenizer_path)
 
 
+# ideally this could be tested and used as a general scatter for updating data in the KV cache and the rollout, or something similar to it
 def batched_scatter(target: jax.Array, indices: jax.Array, update: jax.Array) -> jax.Array:
     dnums = jax.lax.ScatterDimensionNumbers(
         update_window_dims=(1, 2),

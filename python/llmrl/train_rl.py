@@ -8,10 +8,10 @@ from llmrl._envs import ArithmeticEnv
 from llmrl.env.base import Env
 from llmrl.agent.lite import LiteAgent
 # from llmrl.env.basic_arithmetic import BasicArithmeticEnv
-from python.llmrl.agent.local import LocalAgent
-from python.llmrl.checkpoint import load_model
-from python.llmrl.config import LoraConfig
-from python.llmrl.model import Qwen3
+from llmrl.agent.local import LocalAgent
+from llmrl.checkpoint import load_model
+from llmrl.config import LoraConfig
+from llmrl.model import Qwen3
 
 
 def main():
