@@ -32,9 +32,14 @@ class LocalAgent(Agent):
 
         self._rng_key = rng_key
 
-        self._kv_cache = self._model.initialize_carry(
-            self._agent_count, self._max_context_length
-        )
+        shape = (self._agent_count, self._max_context_length)
+        self._context = jnp.zeros(shape, dtype=jnp.int32)
+        self._is_prompt = jnp.zeros(shape, dtype=jnp.bool_)
+        self._log_probs = jnp.zeros(shape, dtype=jnp.float32)
+        self._values = jnp.zeros(shape, jnp.float32)
+        self._rewards = np.zeros(shape, np.float32)
+
+        self._kv_cache = self._model.initialize_carry(*shape)
 
     @override
     def reset(self):
@@ -53,7 +58,7 @@ class LocalAgent(Agent):
             self._tokenizer, self._messages, self._max_context_length
         )
 
-        self._kv_cache, self._positions, output, self._rng_key = generate(
+        self._kv_cache, self._positions, self._context, self._rng_key = generate(
             self._model,
             self._sampling_config,
             self._kv_cache,
@@ -62,7 +67,7 @@ class LocalAgent(Agent):
             self._rng_key,
         )
 
-        response: list[str] = self._tokenizer.batch_decode(np.asarray(output))
+        response: list[str] = self._tokenizer.batch_decode(np.asarray(self._context))
 
         for messages, res in zip(self._messages, response):
             messages.append({
