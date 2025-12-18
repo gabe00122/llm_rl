@@ -40,10 +40,15 @@ class Config(NamedTuple):
     quant_cache: bool = True
     quant_scale_dtype: "jnp.dtype" = jnp.bfloat16
 
+
 def hf_to_jax_config(hf_config: Any | dict[str, Any]) -> "Config":
     def _get(x, k, default=None):
-        return getattr(x, k, default) if not isinstance(hf_config, dict) else hf_config.get(k, default)
-    
+        return (
+            getattr(x, k, default)
+            if not isinstance(hf_config, dict)
+            else hf_config.get(k, default)
+        )
+
     return Config(
         embed=_get(hf_config, "hidden_size"),
         mlp_ffw_size=_get(hf_config, "intermediate_size", -1),
@@ -75,10 +80,11 @@ class SamplingConfig(NamedTuple):
     top_k: int
     top_p: float
 
+
 def load_sampling_config(config_path: str | os.PathLike[str] | Path) -> SamplingConfig:
     with open(config_path, "r") as f:
         data: dict[str, Any] = json.load(f)
-    
+
     temperature = data.get("temperature", 1.0)
     top_k = data.get("top_k", 20)
     top_p = data.get("top_p", 1.0)

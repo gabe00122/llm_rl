@@ -10,6 +10,7 @@ from rich.console import Console
 from llmrl._envs import ArithmeticEnv
 from llmrl.env.base import Env
 from llmrl.agent.lite import LiteAgent
+
 # from llmrl.env.basic_arithmetic import BasicArithmeticEnv
 from llmrl.agent.local import LocalAgent
 from llmrl.checkpoint import load_model
@@ -23,12 +24,10 @@ def main():
     lora_config = LoraConfig(False, False, 0)
     rngs = nnx.Rngs(0)
     model, tokenizer, sampling = load_model(model_path, lora_config, rngs)
-    sampling = sampling._replace(
-        temperature=0.0
-    )
+    sampling = sampling._replace(temperature=0.0)
 
     batch_size = 64 // 1
-    seq_length = 1024 * 1 #16384 #512
+    seq_length = 1024 * 1  # 16384 #512
 
     env: Env = ArithmeticEnv(batch_size)
     # print(tokenizer.vocab_size)
@@ -48,11 +47,11 @@ def main():
         batch_size,
         seq_length,
         env.instructions(),
-        rngs.agent()
+        rngs.agent(),
     )
 
     total_reward = 0
-    iterations = 20 #128 // batch_size
+    iterations = 20  # 128 // batch_size
 
     total_tokens = 0
 

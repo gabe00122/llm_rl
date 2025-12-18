@@ -181,17 +181,15 @@ def generate(
 
         use_sample = gen_positions > carry.turn_start_positions
         next_tokens = jnp.where(
-            use_sample,
-            sample_tokens,
-            carry.context[batch_index, gen_positions]
+            use_sample, sample_tokens, carry.context[batch_index, gen_positions]
         )
 
-        next_context = carry.context.at[batch_index, gen_positions].set(
-            next_tokens
-        )
+        next_context = carry.context.at[batch_index, gen_positions].set(next_tokens)
 
         # check for finished states
-        next_finished = jnp.logical_or(carry.turn_finished, gen_positions >= seq_length - 1)
+        next_finished = jnp.logical_or(
+            carry.turn_finished, gen_positions >= seq_length - 1
+        )
         # we check to make sure we aren't reading the prompt and that the model sampled a end token
         next_finished = jnp.logical_or(
             next_finished, jnp.logical_and(sample_tokens == EOS_1, use_sample)

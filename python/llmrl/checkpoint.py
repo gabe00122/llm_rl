@@ -15,7 +15,6 @@ from llmrl.model import Qwen3
 from llmrl.util import load_tokenizer
 
 
-
 def _put_path(data: dict, path: list[str], value) -> None:
     """Insert `value` into a nested dict following `path` segments."""
     head, *tail = path
@@ -34,6 +33,7 @@ def load_param_dict(params: dict[str, object], file_path: Path):
             value = f.get_tensor(key)
             _put_path(params, key_path, value)
 
+
 def load_safetensors(file_path: str):
     params: dict[str, object] = {}
 
@@ -42,6 +42,7 @@ def load_safetensors(file_path: str):
         load_param_dict(params, file)
 
     return params
+
 
 def load_model(model_path: str, lora_config: LoraConfig, rngs: nnx.Rngs):
     config = load_config(f"{model_path}/config.json")
@@ -52,7 +53,7 @@ def load_model(model_path: str, lora_config: LoraConfig, rngs: nnx.Rngs):
     model = Qwen3(config, rngs=rngs)
     model.initialize_lora(lora_config, rngs=rngs)
     model.load_params(params)
-    
+
     return model, tokenizer, sampling
 
 
@@ -72,12 +73,9 @@ class Checkpointer:
 
         target_state = nnx.state(model, param_filter)
         abstract_state = jax.tree.map(
-            lambda x, s: jax.ShapeDtypeStruct(
-                shape=x.shape, 
-                dtype=x.dtype, 
-                sharding=s
-            ),
-            target_state, nnx.get_named_sharding(target_state, mesh)
+            lambda x, s: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype, sharding=s),
+            target_state,
+            nnx.get_named_sharding(target_state, mesh),
         )
 
         restored_state = self.mngr.restore(
@@ -85,7 +83,7 @@ class Checkpointer:
         )
 
         nnx.update(model, restored_state)
-        
+
         return model
 
     def restore_latest[T](self, model: T, param_filter: Filter = nnx.Param) -> T:

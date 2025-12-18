@@ -49,10 +49,7 @@ class LocalAgent(Agent):
     @override
     def act(self, obs: Iterable[str]) -> list[str]:
         for messages, o in zip(self._messages, obs):
-            messages.append({
-                "role": "user",
-                "content": o
-            })
+            messages.append({"role": "user", "content": o})
 
         prompts = encode_input(
             self._tokenizer, self._messages, self._max_context_length
@@ -70,9 +67,6 @@ class LocalAgent(Agent):
         response: list[str] = self._tokenizer.batch_decode(np.asarray(self._context))
 
         for messages, res in zip(self._messages, response):
-            messages.append({
-                "role": "assistant",
-                "content": get_last_turn(res)
-            })
+            messages.append({"role": "assistant", "content": get_last_turn(res)})
 
         return response

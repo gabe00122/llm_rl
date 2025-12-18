@@ -1,6 +1,7 @@
 import jax
 from jax import numpy as jnp
 
+
 def apply_rope(
     inputs: jax.Array,
     positions: jax.Array,
