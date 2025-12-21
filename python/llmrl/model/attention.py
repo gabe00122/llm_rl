@@ -13,7 +13,6 @@ from llmrl.rope import apply_rope
 class KVCache(NamedTuple):
     key: jax.Array
     value: jax.Array
-    # length: jax.Array
 
 
 class AttentionLayer(nnx.Module):
