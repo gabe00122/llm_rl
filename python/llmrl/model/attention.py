@@ -8,6 +8,7 @@ from llmrl.config import Config, LoraConfig
 from llmrl.model.lora import LoRAGeneral
 from llmrl.model.util import _load_param
 from llmrl.rope import apply_rope
+from llmrl.util import batched_put
 
 
 class KVCache(NamedTuple):
@@ -124,30 +125,8 @@ class AttentionLayer(nnx.Module):
         key_update: jax.Array,
         value_update: jax.Array,
     ) -> KVCache:
-        scatter_indices = positions
-
-        dnums = jax.lax.ScatterDimensionNumbers(
-            update_window_dims=(1, 2),
-            inserted_window_dims=(1,),
-            scatter_dims_to_operand_dims=(1,),
-            operand_batching_dims=(0,),
-            scatter_indices_batching_dims=(0,),
-        )
-
-        new_key = jax.lax.scatter(
-            carry.key,
-            scatter_indices,
-            key_update.squeeze(1),
-            dnums,
-            unique_indices=True,
-        )
-        new_value = jax.lax.scatter(
-            carry.value,
-            scatter_indices,
-            value_update.squeeze(1),
-            dnums,
-            unique_indices=True,
-        )
+        new_key = batched_put(carry.key, positions, key_update)
+        new_value = batched_put(carry.value, positions, value_update)
 
         return KVCache(new_key, new_value)
 

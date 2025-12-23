@@ -22,4 +22,4 @@ class ValueNetwork(nnx.Module):
         x = self.up(x)
         x = jax.nn.silu(x)
         x = self.down(x)
-        return x
+        return x.squeeze(-1)

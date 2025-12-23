@@ -1,6 +1,7 @@
 import json
 import os
 import jax
+from jax import numpy as jnp
 
 from transformers import AutoTokenizer, PreTrainedTokenizerFast
 from zipp import Path
@@ -13,13 +14,11 @@ def load_tokenizer(
 
 
 # ideally this could be tested and used as a general scatter for updating data in the KV cache and the rollout, or something similar to it
-def batched_scatter(
-    target: jax.Array, indices: jax.Array, update: jax.Array
+def batched_put(
+    target: jax.Array, indices: jax.Array, values: jax.Array
 ) -> jax.Array:
-    update_dims = tuple(range(1, len(update.shape)))
-
     dnums = jax.lax.ScatterDimensionNumbers(
-        update_window_dims=update_dims,
+        update_window_dims=range(2, values.ndim),
         inserted_window_dims=(1,),
         scatter_dims_to_operand_dims=(1,),
         operand_batching_dims=(0,),
@@ -28,8 +27,12 @@ def batched_scatter(
 
     return jax.lax.scatter(
         target,
-        indices,
-        update.squeeze(1),  # maybe this should happen in the caller
+        indices[..., None],
+        values,
         dnums,
+        indices_are_sorted=True,
         unique_indices=True,
     )
+
+def batched_get():
+    pass

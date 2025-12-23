@@ -2,6 +2,7 @@ import time
 from typing import Any, Literal, NamedTuple
 import jax
 from jax import numpy as jnp
+from llmrl.util import batched_put
 import numpy as np
 from flax import nnx
 
@@ -66,11 +67,7 @@ def decode_responses(
 
     output = []
     for b in indices.tolist():
-        # print(f"{gen.turn_start_positions[b]} -> {gen.context_length[b]}")
-        print(tokenizer.decode(np.asarray(gen.context[b])))
-        print("\n-------\n")
-        # this should actually only decode sequences that are finished, some might still be in progress
-        output.append(tokenizer.decode(np.asarray(gen.context[b, gen.turn_start_positions[b] : gen.context_length[b]])))
+        output.append(tokenizer.decode(np.asarray(gen.context[b, gen.turn_start_positions[b] : gen.context_length[b]-2])))
 
     return output
 
@@ -175,13 +172,16 @@ def generate(
 
         sample_key, rng_key = jax.random.split(carry.rng_key)
 
-        log_prob = None
+        next_log_probs = gen.log_probs
+
+        next_values = gen.values.at[batch_index, carry.kv_cache_length].set(value.squeeze(-1))
         if sampling == "greedy":
             sample_tokens = jnp.argmax(logits.squeeze(-2), -1)
         elif sampling == "simple":
-            dist = Categorical(logits=logits)
+            dist = Categorical(logits=logits.squeeze(-2))
             sample_tokens: jax.Array = dist.sample(seed=sample_key)
             log_prob = dist.log_prob(sample_tokens)
+            next_log_probs = next_log_probs.at[batch_index, carry.kv_cache_length].set(log_prob)
         else:
             sample_tokens = sample(sampling, logits.squeeze(axis=-2), sample_key)
 
@@ -204,7 +204,7 @@ def generate(
             next_finished, jnp.logical_and(in_tokens == EOS_1, use_sample)
         )
 
-        jax.debug.print("{} - {}", use_sample[0], out_tokens[0])
+        # jax.debug.print("{} - {}", use_sample[0], out_tokens[0])
 
         return carry._replace(
             kv_cache=kv_cache,
@@ -212,6 +212,8 @@ def generate(
             context_length=next_context_length,
             context=next_context,
             turn_finished=next_finished,
+            log_probs=next_log_probs,
+            values=next_values,
             rng_key=rng_key,
         )
 
@@ -248,7 +250,10 @@ def chat(
 
         # start_time = time.time()
 
-        gen: GenerationState = generate(model_def, model_state, sampling, gen)
+        gen: GenerationState = generate(model_def, model_state, "simple", gen)
+
+        console.print(gen.log_probs)
+        console.print(gen.values)
 
         output_text: list[str] = decode_responses(
             tokenizer, gen
@@ -266,14 +271,15 @@ def chat(
 
 
 def main():
-    model_path = "./base-models/qwen3-0.6b"
-    # model_path = "./base-models/Qwen3-4B-Instruct-2507"
+    # model_path = "./base-models/qwen3-0.6b"
+    model_path = "./base-models/Qwen3-4B-Instruct-2507"
+    # model_path = "./base-models/Qwen3-4B-Thinking-2507"
     lora_config = LoraConfig(False, False, 0)
     rngs = nnx.Rngs(0)
     model, tokenizer, sampling = load_model(model_path, lora_config, rngs)
 
     batch_size = 1
-    seq_length =  1024 #16384  # 512
+    seq_length =  16384  # 512
     chat(Console(), model, tokenizer, sampling, batch_size, seq_length, rngs)
 
 
