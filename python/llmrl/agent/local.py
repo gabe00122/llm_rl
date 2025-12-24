@@ -1,7 +1,6 @@
-from typing import Any, Iterable, override
+from typing import override
 
 import jax
-import numpy as np
 from jax import numpy as jnp
 from flax import nnx
 
@@ -15,8 +14,6 @@ from llmrl.chat import (
     append_prompt_tokens,
     append_user_prompts
 )
-from llmrl.config import SamplingConfig
-from llmrl.model import Qwen3
 from transformers import PreTrainedTokenizerFast
 
 

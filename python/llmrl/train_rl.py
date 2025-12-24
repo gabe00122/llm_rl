@@ -27,16 +27,6 @@ def main():
 
     env: Env = ArithmeticEnv(batch_size)
 
-    print(env.step(np.array([0], dtype=np.int32), ["55"]))
-
-    # os.environ["LM_STUDIO_API_BASE"] = ""
-
-    # env = BasicArithmeticEnv()
-    # agent = LiteAgent(
-    #     model="lm_studio/qwen/qwen3-30b-a3b-thinking-2507",  # "openrouter/openai/gpt-oss-20b",
-    #     agent_count=1,
-    #     instructions=env.instructions(),
-    # )
     model_def, model_state = nnx.split(model)
 
     agent = LocalAgent(
@@ -54,37 +44,29 @@ def main():
 
     obs = env.reset(np.asarray(env_indices))
 
-    for _ in range(5):
-        env_indices, response = agent.act(env_indices, obs, rewards)
+    correct_count = 0
+    total_count = 0
 
-        print(env_indices)
-        print(response)
+    start = time.time()
+    for _ in range(50):
+        env_indices, actions = agent.act(env_indices, obs, rewards)
 
-    # total_reward = 0
-    # iterations = 128 // batch_size
+        obs, t_rewards, done = env.step(np.asarray(env_indices), actions)
+        print(t_rewards)
+        print(agent._gen.kv_cache_length.max())
 
-    # total_tokens = 0
+        correct_count += t_rewards.sum().item()
+        total_count += t_rewards.size
 
-    # start_time = time.time()
-    # for _ in range(iterations):
-    #     agent.reset()
-    #     obs = env.reset()
+    end = time.time()
 
-    #     print(obs)
-    #     actions = agent.act(obs)
-    #     print(actions)
-    #     total_tokens += sum([len(action) for action in actions])
+    delta = end - start
+    print(100 / delta)
+    print(agent._gen.kv_cache_length.sum().item() / delta)
+    print(correct_count / total_count)
 
-    #     obs, rewards = env.step(actions)
-    #     total_reward += sum(rewards)
-
-    #     print("\n---\n")
-    # stop_time = time.time()
-    # delta_time = stop_time - start_time
-
-    # print(f"Total reward: {total_reward / (iterations * batch_size)}")
-    # print(f"Tokens per second: {total_tokens / delta_time}")
-    # print(f"Turns per second: {(iterations * batch_size) / delta_time}")
+    print(delta)
+    print(total_count)
 
 
 if __name__ == "__main__":

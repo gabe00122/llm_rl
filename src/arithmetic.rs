@@ -29,7 +29,7 @@ pub struct ArithmeticEnv {
 }
 
 fn sample_op(rng: &mut impl Rng) -> Operator {
-    let id: u8 = rng.sample(Uniform::new(0, 4).unwrap());
+    let id: u8 = 0;//rng.sample(Uniform::new(0, 4).unwrap());
     match id {
         0 => Operator::Add,
         1 => Operator::Sub,
@@ -105,7 +105,7 @@ impl ArithmeticEnvInstance {
         let reward = if corrected { 1.0 } else { 0.0 };
         let done = true;
 
-        (String::new(), reward, done)
+        (self.reset(), reward, done)
     }
 }
 
