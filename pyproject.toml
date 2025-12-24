@@ -27,5 +27,14 @@ features = ["pyo3/extension-module"]
 python-source = "python"
 module-name = "llmrl._envs"
 
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
+
 [project.scripts]
 eval_env = "llmrl.eval_env:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["python"]

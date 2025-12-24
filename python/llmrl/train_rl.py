@@ -1,6 +1,7 @@
 import os
 import time
 
+from jax import numpy as jnp
 import numpy as np
 from flax import nnx
 
@@ -26,6 +27,8 @@ def main():
 
     env: Env = ArithmeticEnv(batch_size)
 
+    print(env.step(np.array([0], dtype=np.int32), ["55"]))
+
     # os.environ["LM_STUDIO_API_BASE"] = ""
 
     # env = BasicArithmeticEnv()
@@ -34,41 +37,54 @@ def main():
     #     agent_count=1,
     #     instructions=env.instructions(),
     # )
+    model_def, model_state = nnx.split(model)
+
     agent = LocalAgent(
-        model,
-        sampling,
+        model_def,
+        model_state,
         tokenizer,
         batch_size,
         seq_length,
         env.instructions(),
         rngs.agent(),
     )
+    
+    env_indices = jnp.arange(batch_size, dtype=np.int32)
+    rewards = jnp.zeros((batch_size,), dtype=np.float32)
 
-    total_reward = 0
-    iterations = 128 // batch_size
+    obs = env.reset(np.asarray(env_indices))
 
-    total_tokens = 0
+    for _ in range(5):
+        env_indices, response = agent.act(env_indices, obs, rewards)
 
-    start_time = time.time()
-    for _ in range(iterations):
-        agent.reset()
-        obs = env.reset()
+        print(env_indices)
+        print(response)
 
-        print(obs)
-        actions = agent.act(obs)
-        print(actions)
-        total_tokens += sum([len(action) for action in actions])
+    # total_reward = 0
+    # iterations = 128 // batch_size
 
-        obs, rewards = env.step(actions)
-        total_reward += sum(rewards)
+    # total_tokens = 0
 
-        print("\n---\n")
-    stop_time = time.time()
-    delta_time = stop_time - start_time
+    # start_time = time.time()
+    # for _ in range(iterations):
+    #     agent.reset()
+    #     obs = env.reset()
 
-    print(f"Total reward: {total_reward / (iterations * batch_size)}")
-    print(f"Tokens per second: {total_tokens / delta_time}")
-    print(f"Turns per second: {(iterations * batch_size) / delta_time}")
+    #     print(obs)
+    #     actions = agent.act(obs)
+    #     print(actions)
+    #     total_tokens += sum([len(action) for action in actions])
+
+    #     obs, rewards = env.step(actions)
+    #     total_reward += sum(rewards)
+
+    #     print("\n---\n")
+    # stop_time = time.time()
+    # delta_time = stop_time - start_time
+
+    # print(f"Total reward: {total_reward / (iterations * batch_size)}")
+    # print(f"Tokens per second: {total_tokens / delta_time}")
+    # print(f"Turns per second: {(iterations * batch_size) / delta_time}")
 
 
 if __name__ == "__main__":

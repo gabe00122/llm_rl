@@ -6,7 +6,15 @@ from jax import numpy as jnp
 from flax import nnx
 
 from llmrl.agent.base import Agent
-from llmrl.chat import encode_input, generate, get_last_turn
+from llmrl.chat import (
+    create_generation_state,
+    encode_input,
+    decode_responses,
+    generate,
+    reset_generation_state,
+    append_prompt_tokens,
+    append_user_prompts
+)
 from llmrl.config import SamplingConfig
 from llmrl.model import Qwen3
 from transformers import PreTrainedTokenizerFast
@@ -15,16 +23,16 @@ from transformers import PreTrainedTokenizerFast
 class LocalAgent(Agent):
     def __init__(
         self,
-        model: Qwen3,
-        sampling_config: SamplingConfig,
+        model_def,
+        model_state,
         tokenizer: PreTrainedTokenizerFast,
         agent_count: int,
         max_context_length: int,
         instructions: str,
         rng_key: jax.Array,
     ):
-        self._model = model
-        self._sampling_config = sampling_config
+        self._model_def = model_def
+        self._model_state = model_state
         self._tokenizer = tokenizer
         self._agent_count = agent_count
         self._max_context_length = max_context_length
@@ -33,40 +41,41 @@ class LocalAgent(Agent):
         self._rng_key = rng_key
 
         shape = (self._agent_count, self._max_context_length)
-        self._context = jnp.zeros(shape, dtype=jnp.int32)
-        self._is_prompt = jnp.zeros(shape, dtype=jnp.bool_)
-        self._log_probs = jnp.zeros(shape, dtype=jnp.float32)
-        self._values = jnp.zeros(shape, jnp.float32)
-        self._rewards = np.zeros(shape, np.float32)
+        kv_cache = nnx.merge(self._model_def, self._model_state).initialize_carry(*shape)
+        self._gen = create_generation_state(
+            kv_cache, self._agent_count, self._max_context_length, self._rng_key
+        )
 
-        self._kv_cache = self._model.initialize_carry(*shape)
+        self._instruction_tokens = encode_input(
+            tokenizer,
+            [
+                [{"role": "system", "content": self._instructions}]
+                for _ in range(agent_count)
+            ],
+            False,
+        )
+
+        self._gen = append_prompt_tokens(
+            self._gen,
+            jnp.arange(self._agent_count, dtype=jnp.int32),
+            self._instruction_tokens,
+        )
 
     @override
     def reset(self):
-        self._messages: list[list[Any]] = [[] for _ in range(self._agent_count)]
-        self._positions = jnp.zeros((self._agent_count,), dtype=jnp.int32)
+        self._gen = reset_generation_state(self._gen)
+        self._gen = append_prompt_tokens(
+            self._gen,
+            jnp.arange(self._agent_count, dtype=jnp.int32),
+            self._instruction_tokens,
+        )
 
     @override
-    def act(self, obs: Iterable[str]) -> list[str]:
-        for messages, o in zip(self._messages, obs):
-            messages.append({"role": "user", "content": o})
+    def act(
+        self, batch_indices: jax.Array, obs: list[str], rewards: jax.Array
+    ) -> tuple[jax.Array, list[str]]:
+        self._gen = append_user_prompts(self._gen, batch_indices, self._tokenizer, obs)
+        self._gen = generate(self._model_def, self._model_state, "simple", self._gen)
 
-        prompts = encode_input(
-            self._tokenizer, self._messages, self._max_context_length
-        )
-
-        self._kv_cache, self._positions, self._context, self._rng_key = generate(
-            self._model,
-            self._sampling_config,
-            self._kv_cache,
-            self._positions,
-            prompts,
-            self._rng_key,
-        )
-
-        response: list[str] = self._tokenizer.batch_decode(np.asarray(self._context))
-
-        for messages, res in zip(self._messages, response):
-            messages.append({"role": "assistant", "content": get_last_turn(res)})
-
-        return response
+        response_indices, response = decode_responses(self._tokenizer, self._gen)
+        return response_indices, response

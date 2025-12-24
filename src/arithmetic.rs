@@ -1,7 +1,7 @@
 extern crate rand;
 
-use std::iter::zip;
-
+use itertools::MultiUnzip;
+use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::prelude::*;
 use rand::{distr::Uniform, prelude::*};
 use regex::Regex;
@@ -15,6 +15,8 @@ pub enum Operator {
 }
 
 struct ArithmeticEnvInstance {
+    number_re: Regex,
+    rng: SmallRng,
     op: Operator,
     x: f32,
     y: f32,
@@ -23,9 +25,7 @@ struct ArithmeticEnvInstance {
 
 #[pyclass]
 pub struct ArithmeticEnv {
-    number_re: Regex,
-    rng: SmallRng,
-    envs: Vec<ArithmeticEnvInstance>
+    envs: Vec<ArithmeticEnvInstance>,
 }
 
 fn sample_op(rng: &mut impl Rng) -> Operator {
@@ -66,8 +66,10 @@ fn parse_response(re: &Regex, text: &str) -> Option<f32> {
 }
 
 impl ArithmeticEnvInstance {
-    fn new() -> Self {
+    fn new(seed: u64) -> Self {
         ArithmeticEnvInstance {
+            number_re: Regex::new(r"[\d,]+(?:\.\d*)?").unwrap(),
+            rng: SmallRng::seed_from_u64(seed),
             op: Operator::Add,
             x: 0.0,
             y: 0.0,
@@ -75,11 +77,11 @@ impl ArithmeticEnvInstance {
         }
     }
 
-    fn reset(&mut self, rng: &mut impl Rng) -> String {
+    fn reset(&mut self) -> String {
         let dist = Uniform::new(0.0, 10000.0).unwrap();
-        let x: f32 = rng.sample::<f32, _>(dist).round();
-        let y: f32 = rng.sample::<f32, _>(dist).round();
-        let op = sample_op(rng);
+        let x: f32 = self.rng.sample::<f32, _>(dist).round();
+        let y: f32 = self.rng.sample::<f32, _>(dist).round();
+        let op = sample_op(&mut self.rng);
 
         self.x = x;
         self.y = y;
@@ -92,8 +94,8 @@ impl ArithmeticEnvInstance {
         prompt
     }
 
-    fn step(&self, action: &str, number_regex: &Regex) -> (String, f32) {
-        let parsed = parse_response(number_regex, action);
+    fn step(&mut self, action: &str) -> (String, f32, bool) {
+        let parsed = parse_response(&self.number_re, action);
 
         let corrected = if let Some(p) = parsed {
             (p - self.result).abs() < 0.001
@@ -101,8 +103,9 @@ impl ArithmeticEnvInstance {
             false
         };
         let reward = if corrected { 1.0 } else { 0.0 };
+        let done = true;
 
-        (String::new(), reward)
+        (String::new(), reward, done)
     }
 }
 
@@ -110,32 +113,51 @@ impl ArithmeticEnvInstance {
 impl ArithmeticEnv {
     #[new]
     fn new(num_agents: i32) -> Self {
+        let mut rng = SmallRng::seed_from_u64(1);
+
         let envs = (0..num_agents)
-            .map(|_| ArithmeticEnvInstance::new())
+            .map(|_| ArithmeticEnvInstance::new(rng.next_u64()))
             .collect();
 
         ArithmeticEnv {
-            number_re: Regex::new(r"[\d,]+(?:\.\d*)?").unwrap(),
-            rng: SmallRng::seed_from_u64(1),
             envs,
         }
     }
 
-    fn reset(&mut self) -> PyResult<Vec<String>> {
-        let result = self.envs
-            .iter_mut()
-            .map(|env| env.reset(&mut self.rng))
+    fn reset<'py>(&mut self, batch_indices: PyReadonlyArray1<'py, i32>) -> PyResult<Vec<String>> {
+        let indices = batch_indices.as_array();
+        
+        let result = indices
+            .iter()
+            .map(|&i| self.envs.get_mut(i as usize).unwrap().reset())
             .collect();
 
         Ok(result)
     }
 
-    fn step(&self, actions: Vec<String>) -> PyResult<(Vec<String>, Vec<f32>)> {
-        let result = zip(&self.envs, &actions)
-            .map(|(env, action)| env.step(action, &self.number_re))
-            .unzip();
+    fn step<'py>(
+        &mut self,
+        py: Python<'py>,
+        batch_indices: PyReadonlyArray1<'py, i32>,
+        actions: Vec<String>,
+    ) -> PyResult<(Vec<String>, Bound<'py, PyArray1<f32>>, Bound<'py, PyArray1<bool>>)> {
+        let indices = batch_indices.as_array();
 
-        Ok(result)
+        let (obs, rewards, dones): (Vec<String>, Vec<f32>, Vec<bool>) = indices
+            .iter()
+            .zip(actions.iter())
+            .map(|(&i, action)| {
+                self.envs
+                    .get_mut(i as usize)
+                    .unwrap()
+                    .step(action)
+            })
+            .multiunzip();
+        
+        let rewards: Bound<'py, PyArray1<f32>> = rewards.into_pyarray(py);
+        let dones: Bound<'py, PyArray1<bool>> = dones.into_pyarray(py);
+
+        Ok((obs, rewards, dones))
     }
 
     fn instructions(&self) -> PyResult<&'static str> {

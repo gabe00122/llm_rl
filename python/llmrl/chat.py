@@ -49,27 +49,35 @@ class GenerationState(NamedTuple):
 
 def encode_input(
     tokenizer: PreTrainedTokenizerFast,
-    conversations: list[list[dict]] | list[dict],
-):
+    conversations: list[list[dict]],
+    add_generation_prompt=True,
+) -> list[np.ndarray]:
     return tokenizer.apply_chat_template(
         conversations,
-        add_generation_prompt=True,
+        add_generation_prompt=add_generation_prompt,
         return_tensors="np",
-        enable_thinking=False
     )
 
 
 def decode_responses(
     tokenizer: PreTrainedTokenizerFast,
-    gen: 'GenerationState',
-) -> list[str]:
+    gen: GenerationState,
+) -> tuple[jax.Array, list[str]]:
     (indices,) = jnp.where(gen.turn_finished)
 
     output = []
     for b in indices.tolist():
-        output.append(tokenizer.decode(np.asarray(gen.context[b, gen.turn_start_positions[b] : gen.context_length[b]-2])))
+        output.append(
+            tokenizer.decode(
+                np.asarray(
+                    gen.context[
+                        b, gen.turn_start_positions[b] : gen.context_length[b] - 2
+                    ]
+                )
+            )
+        )
 
-    return output
+    return indices, output
 
 
 def sample(config: SamplingConfig, logits, rng_key):
@@ -101,7 +109,6 @@ def create_generation_state(
         turn_start_positions=jnp.zeros(batch_size, jnp.int32),
         prompt_mask=jnp.zeros((batch_size, seq_len), jnp.bool_),
         context=jnp.zeros((batch_size, seq_len), jnp.int32),
-        # next_tokens=jnp.zeros(batch_size, jnp.int32),
         turn_finished=jnp.zeros(batch_size, jnp.bool_),
         log_probs=jnp.zeros((batch_size, seq_len), jnp.float32),
         values=jnp.zeros((batch_size, seq_len), jnp.float32),
@@ -133,7 +140,7 @@ def append_prompt_tokens(
         end = start + prompt.shape[0]
         context = context.at[i, start:end].set(prompt)
         prompt_mask = prompt_mask.at[i, start:end].set(np.ones_like(prompt, np.bool_))
-        
+
         turn_start_positions = turn_start_positions.at[i].set(end)
 
     return state._replace(
@@ -141,8 +148,14 @@ def append_prompt_tokens(
         prompt_mask=prompt_mask,
         turn_start_positions=turn_start_positions,
         context_length=jnp.copy(turn_start_positions),
-        turn_finished=turn_finished
+        turn_finished=turn_finished,
     )
+
+def append_user_prompts(state: GenerationState, batch_indices: jax.Array, tokenizer: PreTrainedTokenizerFast, prompts: list[str]):
+    conversation_turns = [[{"role": "user", "content": content}] for content in prompts]
+    prompt_tokens = encode_input(tokenizer, conversation_turns)
+
+    return append_prompt_tokens(state, batch_indices, prompt_tokens)
 
 
 @jax.jit(static_argnames=("model_def", "sampling"), donate_argnames=("gen",))
@@ -159,7 +172,7 @@ def generate(
 
     def cond(carry: GenerationState):
         # todo: let's check for n number of finished episodes
-        return jnp.logical_not(jnp.any(carry.turn_finished))
+        return jnp.sum(carry.turn_finished) < 2
 
     def body(carry: GenerationState):
         in_tokens = carry.context[batch_index, carry.kv_cache_length]
@@ -174,26 +187,34 @@ def generate(
 
         next_log_probs = gen.log_probs
 
-        next_values = gen.values.at[batch_index, carry.kv_cache_length].set(value.squeeze(-1))
+        next_values = gen.values.at[batch_index, carry.kv_cache_length].set(
+            value.squeeze(-1)
+        )
         if sampling == "greedy":
             sample_tokens = jnp.argmax(logits.squeeze(-2), -1)
         elif sampling == "simple":
             dist = Categorical(logits=logits.squeeze(-2))
             sample_tokens: jax.Array = dist.sample(seed=sample_key)
             log_prob = dist.log_prob(sample_tokens)
-            next_log_probs = next_log_probs.at[batch_index, carry.kv_cache_length].set(log_prob)
+            next_log_probs = next_log_probs.at[batch_index, carry.kv_cache_length].set(
+                log_prob
+            )
         else:
             sample_tokens = sample(sampling, logits.squeeze(axis=-2), sample_key)
 
-        next_kv_cache_length = carry.kv_cache_length + 1
-        next_context_length = jnp.maximum(carry.context_length, next_kv_cache_length + 1)
+        next_kv_cache_length = jnp.where(carry.turn_finished, carry.kv_cache_length, carry.kv_cache_length + 1)
+        next_context_length = jnp.maximum(
+            carry.context_length, next_kv_cache_length + 1
+        )
 
         use_sample = next_kv_cache_length >= carry.turn_start_positions
         out_tokens = jnp.where(
             use_sample, sample_tokens, carry.context[batch_index, next_kv_cache_length]
         )
 
-        next_context = carry.context.at[batch_index, next_kv_cache_length].set(out_tokens)
+        next_context = carry.context.at[batch_index, next_kv_cache_length].set(
+            out_tokens
+        )
 
         # check for finished states
         next_finished = jnp.logical_or(
@@ -237,12 +258,12 @@ def chat(
     gen = create_generation_state(kv_cache, batch_size, seq_length, rng_key)
 
     while True:
-        prompt = console.input("Prompt:\n")
+        prompt = console.input("Prompt: ")
 
         if prompt == "/clear":
             gen = reset_generation_state(gen)
             continue
-        
+
         text = [{"role": "user", "content": prompt} for _ in range(batch_size)]
         prompt_tokens = encode_input(tokenizer, text)
 
@@ -252,12 +273,7 @@ def chat(
 
         gen: GenerationState = generate(model_def, model_state, "simple", gen)
 
-        console.print(gen.log_probs)
-        console.print(gen.values)
-
-        output_text: list[str] = decode_responses(
-            tokenizer, gen
-        )
+        _, output_text = decode_responses(tokenizer, gen)
         for out in output_text:
             assistant = out  # get_last_turn(out)
             console.print("--------")
@@ -279,7 +295,7 @@ def main():
     model, tokenizer, sampling = load_model(model_path, lora_config, rngs)
 
     batch_size = 1
-    seq_length =  16384  # 512
+    seq_length = 16384  # 512
     chat(Console(), model, tokenizer, sampling, batch_size, seq_length, rngs)
 
 
