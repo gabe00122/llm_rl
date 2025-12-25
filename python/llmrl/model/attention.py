@@ -111,7 +111,7 @@ class AttentionLayer(nnx.Module):
             rngs=rngs,
         )
 
-    def initialize_carry(self, batch_size: int, seq_length: int):
+    def initialize_carry(self, batch_size: int, seq_length: int) -> KVCache:
         shape = (batch_size, seq_length, self._num_kv_heads, self._head_dim)
         key = jnp.zeros(shape, dtype=jnp.bfloat16)
         value = jnp.zeros(shape, dtype=jnp.bfloat16)
@@ -155,7 +155,7 @@ class AttentionLayer(nnx.Module):
                 query,
                 carry.key,
                 carry.value,
-                key_value_seq_lengths=positions.squeeze(-1) + 1,
+                key_value_seq_lengths=positions[:, -1] + 1,
                 implementation="cudnn",
             )
         else:

@@ -18,8 +18,9 @@ class ValueNetwork(nnx.Module):
             hidden_features, 1, dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, rngs=rngs
         )
 
-    def __call__(self, x):
+    def __call__(self, x: jax.Array) -> jax.Array:
         x = self.up(x)
         x = jax.nn.silu(x)
         x = self.down(x)
-        return x.squeeze(-1)
+        
+        return x.squeeze(-1).astype(jnp.float32)

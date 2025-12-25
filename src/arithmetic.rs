@@ -29,7 +29,7 @@ pub struct ArithmeticEnv {
 }
 
 fn sample_op(rng: &mut impl Rng) -> Operator {
-    let id: u8 = 0;//rng.sample(Uniform::new(0, 4).unwrap());
+    let id: u8 = rng.sample(Uniform::new(0, 2).unwrap());
     match id {
         0 => Operator::Add,
         1 => Operator::Sub,

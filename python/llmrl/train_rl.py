@@ -22,8 +22,8 @@ def main():
     rngs = nnx.Rngs(0)
     model, tokenizer, sampling = load_model(model_path, lora_config, rngs)
 
-    batch_size = 64 // 1
-    seq_length = 1024 * 1  # 16384 #512
+    batch_size = 256
+    seq_length = 256  # 16384 #512
 
     env: Env = ArithmeticEnv(batch_size)
 
@@ -39,34 +39,40 @@ def main():
         rngs.agent(),
     )
     
-    env_indices = jnp.arange(batch_size, dtype=np.int32)
+    env_indices = np.arange(batch_size, dtype=np.int32)
     rewards = jnp.zeros((batch_size,), dtype=np.float32)
+    dones = jnp.zeros((batch_size,), dtype=jnp.bool_)
 
-    obs = env.reset(np.asarray(env_indices))
+    obs = env.reset(env_indices)
 
     correct_count = 0
     total_count = 0
 
-    start = time.time()
-    for _ in range(50):
-        env_indices, actions = agent.act(env_indices, obs, rewards)
+    env_time = 0.0
 
-        obs, t_rewards, done = env.step(np.asarray(env_indices), actions)
-        print(t_rewards)
-        print(agent._gen.kv_cache_length.max())
+    start = time.time()
+    for _ in range(100):
+        env_indices, actions = agent.act(env_indices, obs, rewards, dones)
+
+        env_start = time.perf_counter()
+        obs, t_rewards, dones = env.step(env_indices, actions)
+        env_time += time.perf_counter() - env_start
 
         correct_count += t_rewards.sum().item()
         total_count += t_rewards.size
 
-    end = time.time()
+    total_time = time.time() - start
+    print(f"Perfect Correct: {correct_count / total_count:.2%}")
 
-    delta = end - start
-    print(100 / delta)
-    print(agent._gen.kv_cache_length.sum().item() / delta)
-    print(correct_count / total_count)
-
-    print(delta)
-    print(total_count)
+    print(f"Delta: {total_time}")
+    print(f"Total Episodes: {total_count}")
+    print(f"Reset Time: {agent._reset_time / total_time:.2%}")
+    print(f"Gen Time: {agent._gen_time / total_time:.2%}")
+    print(f"Decode Time: {agent._decode_time / total_time:.2%}")
+    print(f"Append Time: {agent._append_time / total_time:.2%}")
+    print(f"Env Time: {env_time / total_time:.2%}")
+    print(f"Unaccounted Time: {1 - (total_time - agent._reset_time - agent._gen_time - agent._decode_time - agent._append_time - env_time) / total_time:.2%}")
+    print(f"Turns per second: {total_count / total_time}")
 
 
 if __name__ == "__main__":
