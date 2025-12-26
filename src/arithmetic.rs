@@ -1,10 +1,11 @@
 extern crate rand;
 
-use itertools::MultiUnzip;
 use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::prelude::*;
 use rand::{distr::Uniform, prelude::*};
 use regex::Regex;
+use crate::env::{EnvInstance, Envs};
+use crate::create_env_wrapper;
 
 #[derive(Clone, Copy)]
 pub enum Operator {
@@ -13,6 +14,8 @@ pub enum Operator {
     Mul,
     Div,
 }
+
+pub struct ArithmeticSettings {}
 
 struct ArithmeticEnvInstance {
     number_re: Regex,
@@ -23,13 +26,8 @@ struct ArithmeticEnvInstance {
     result: f32,
 }
 
-#[pyclass]
-pub struct ArithmeticEnv {
-    envs: Vec<ArithmeticEnvInstance>,
-}
-
 fn sample_op(rng: &mut impl Rng) -> Operator {
-    let id: u8 = rng.sample(Uniform::new(0, 2).unwrap());
+    let id: u8 = rng.sample(Uniform::new(0, 3).unwrap());
     match id {
         0 => Operator::Add,
         1 => Operator::Sub,
@@ -65,8 +63,10 @@ fn parse_response(re: &Regex, text: &str) -> Option<f32> {
     }
 }
 
-impl ArithmeticEnvInstance {
-    fn new(seed: u64) -> Self {
+impl EnvInstance for ArithmeticEnvInstance {
+    type Settings = ArithmeticSettings;
+
+    fn new(seed: u64, _settings: &Self::Settings) -> Self {
         ArithmeticEnvInstance {
             number_re: Regex::new(r"[\d,]+(?:\.\d*)?").unwrap(),
             rng: SmallRng::seed_from_u64(seed),
@@ -109,60 +109,52 @@ impl ArithmeticEnvInstance {
     }
 }
 
-#[pymethods]
-impl ArithmeticEnv {
-    #[new]
-    fn new(num_agents: i32) -> Self {
-        let mut rng = SmallRng::seed_from_u64(1);
+// #[pyclass]
+// pub struct ArithmeticEnv {
+//     envs: Envs<ArithmeticEnvInstance>,
+// }
 
-        let envs = (0..num_agents)
-            .map(|_| ArithmeticEnvInstance::new(rng.next_u64()))
-            .collect();
+// #[pymethods]
+// impl ArithmeticEnv {
+//     #[new]
+//     fn new(num_agents: usize) -> Self {
+//         Self { envs: Envs::new(0, num_agents, &ArithmeticSettings {}) }
+//     }
 
-        ArithmeticEnv {
-            envs,
-        }
-    }
+//     fn reset<'py>(&mut self, batch_indices: PyReadonlyArray1<'py, i32>) -> PyResult<Vec<String>> {
+//         let indices = batch_indices.as_array();
+//         let result = self.envs.reset(indices);
+//         Ok(result)
+//     }
 
-    fn reset<'py>(&mut self, batch_indices: PyReadonlyArray1<'py, i32>) -> PyResult<Vec<String>> {
-        let indices = batch_indices.as_array();
+//     fn step<'py>(
+//         &mut self,
+//         py: Python<'py>,
+//         batch_indices: PyReadonlyArray1<'py, i32>,
+//         actions: Vec<String>,
+//     ) -> PyResult<(Vec<String>, Bound<'py, PyArray1<f32>>, Bound<'py, PyArray1<bool>>)> {
+//         let indices = batch_indices.as_array();
+
+//         let (obs, rewards, dones) = self.envs.step(&indices, &actions);
         
-        let result = indices
-            .iter()
-            .map(|&i| self.envs.get_mut(i as usize).unwrap().reset())
-            .collect();
+//         let rewards: Bound<'py, PyArray1<f32>> = rewards.into_pyarray(py);
+//         let dones: Bound<'py, PyArray1<bool>> = dones.into_pyarray(py);
 
-        Ok(result)
-    }
+//         Ok((obs, rewards, dones))
+//     }
 
-    fn step<'py>(
-        &mut self,
-        py: Python<'py>,
-        batch_indices: PyReadonlyArray1<'py, i32>,
-        actions: Vec<String>,
-    ) -> PyResult<(Vec<String>, Bound<'py, PyArray1<f32>>, Bound<'py, PyArray1<bool>>)> {
-        let indices = batch_indices.as_array();
+//     fn instructions(&self) -> PyResult<&'static str> {
+//         Ok(
+//             "Solve the arithmetic expression using +, -, * or /. Show your work if needed, but end with only the numeric result on its own line. Always output with decimals such as 123.456",
+//         )
+//     }
+// }
 
-        let (obs, rewards, dones): (Vec<String>, Vec<f32>, Vec<bool>) = indices
-            .iter()
-            .zip(actions.iter())
-            .map(|(&i, action)| {
-                self.envs
-                    .get_mut(i as usize)
-                    .unwrap()
-                    .step(action)
-            })
-            .multiunzip();
-        
-        let rewards: Bound<'py, PyArray1<f32>> = rewards.into_pyarray(py);
-        let dones: Bound<'py, PyArray1<bool>> = dones.into_pyarray(py);
 
-        Ok((obs, rewards, dones))
-    }
-
-    fn instructions(&self) -> PyResult<&'static str> {
-        Ok(
-            "Solve the arithmetic expression using +, -, * or /. Show your work if needed, but end with only the numeric result on its own line. Always output with decimals such as 123.456",
-        )
-    }
-}
+// Create the wrapper for Arithmetic
+create_env_wrapper!(
+    ArithmeticEnv,                  // Python Class Name
+    ArithmeticEnvInstance,          // Rust Inner Type
+    ArithmeticSettings {},          // Settings Expression
+    "Solve the arithmetic expression using +, -, * or /. Show your work if needed, but end with only the numeric result on its own line. Always output with decimals such as 123.456" // Instructions
+);
