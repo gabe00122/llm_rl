@@ -64,7 +64,7 @@ def encode_input(
 def decode_responses(
     tokenizer: PreTrainedTokenizerFast,
     gen: GenerationState,
-) -> tuple[jax.Array, list[str]]:
+) -> tuple[np.ndarray, list[str]]:
     (indices,) = np.where(gen.turn_finished)
     indices = indices.astype(np.int32)
 
@@ -72,7 +72,7 @@ def decode_responses(
     turn_start_positions = np.array(gen.turn_start_positions)
     context_length = np.array(gen.context_length)
 
-    output = [tokenizer.decode(context[b, turn_start_positions[b] : context_length[b] - 2]) for b in indices.tolist()]
+    output = [tokenizer.decode(context[b, turn_start_positions[b] : context_length[b] - 2]) for b in indices]
 
     return indices, output
 
@@ -135,7 +135,7 @@ def append_prompt_tokens(
     turn_finished[batch_indices] = False
     # todo: could be more efficient
 
-    for i, prompt in zip(batch_indices.tolist(), prompts):
+    for i, prompt in zip(batch_indices, prompts):
         start = context_length[i].item()
         end = start + prompt.shape[0]
         context[i, start:end] = prompt
@@ -164,20 +164,22 @@ def reset_episodes(state: GenerationState, done_mask: jax.Array) -> GenerationSt
         kv_cache_length = jnp.where(done_mask, state.env_instruction_length, state.kv_cache_length),
     )
 
-@jax.jit(static_argnames=("model_def", "sampling"), donate_argnames=("gen",))
+@jax.jit(static_argnames=("model_def", "sampling", "wait_for"), donate_argnames=("gen",))
 def generate(
     model_def,
     model_state,
     sampling: SamplingConfig | Literal["greedy", "simple"],
     gen: GenerationState,
+    wait_for: int = 1,
 ) -> GenerationState:
     model = nnx.merge(model_def, model_state)
 
     B, seq_length = gen.context.shape
+    # batch_range = jnp.arange(B, dtype=jnp.int32)
 
     def cond(carry: GenerationState):
         # todo: this could infinite loop
-        return jnp.sum(carry.turn_finished) < 1
+        return jnp.sum(carry.turn_finished) < wait_for
 
     def body(carry: GenerationState):
         # in_tokens = carry.context[batch_index, carry.kv_cache_length]
@@ -203,7 +205,11 @@ def generate(
             dist = Categorical(logits=logits.squeeze(-2))
             sample_tokens: jax.Array = dist.sample(seed=sample_key)
             log_prob = dist.log_prob(sample_tokens)
+            # prob = dist.prob(sample_tokens)
+            # next_log_probs = next_log_probs.at[batch_range, carry.kv_cache_length].set(log_prob)
             next_log_probs = batched_put(next_log_probs, carry.kv_cache_length, log_prob)
+            jax.debug.print("{}", log_prob)
+
         else:
             sample_tokens = sample(sampling, logits.squeeze(axis=-2), sample_key)
 
@@ -228,6 +234,8 @@ def generate(
             next_finished, jnp.logical_and(in_tokens == EOS_1, use_sample)
         )
 
+        prompt_mask = batched_put(carry.prompt_mask, carry.kv_cache_length, use_sample)
+
         # jax.debug.print("{} - {}", use_sample[0], out_tokens[0])
 
         return carry._replace(
@@ -238,6 +246,7 @@ def generate(
             turn_finished=next_finished,
             log_probs=next_log_probs,
             values=next_values,
+            prompt_mask=prompt_mask,
             rng_key=rng_key,
         )
 

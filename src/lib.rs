@@ -1,3 +1,4 @@
+mod advantage;
 mod arithmetic;
 mod wordle;
 mod env;

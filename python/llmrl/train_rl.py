@@ -22,8 +22,8 @@ def main():
     rngs = nnx.Rngs(0)
     model, tokenizer, sampling = load_model(model_path, lora_config, rngs)
 
-    batch_size = 256
-    seq_length = 256  # 16384 #512
+    batch_size = 128
+    seq_length = 512  # 16384 #512
 
     env: Env = ArithmeticEnv(batch_size)
 
@@ -51,15 +51,15 @@ def main():
     env_time = 0.0
 
     start = time.time()
-    for _ in range(100):
+    for _ in range(1000):
         env_indices, actions = agent.act(env_indices, obs, rewards, dones)
 
         env_start = time.perf_counter()
-        obs, t_rewards, dones = env.step(env_indices, actions)
+        obs, rewards, dones = env.step(env_indices, actions)
         env_time += time.perf_counter() - env_start
 
-        correct_count += t_rewards.sum().item()
-        total_count += t_rewards.size
+        correct_count += rewards.sum().item()
+        total_count += rewards.size
 
     total_time = time.time() - start
     print(f"Perfect Correct: {correct_count / total_count:.2%}")
@@ -71,7 +71,7 @@ def main():
     print(f"Decode Time: {agent._decode_time / total_time:.2%}")
     print(f"Append Time: {agent._append_time / total_time:.2%}")
     print(f"Env Time: {env_time / total_time:.2%}")
-    print(f"Unaccounted Time: {1 - (total_time - agent._reset_time - agent._gen_time - agent._decode_time - agent._append_time - env_time) / total_time:.2%}")
+    print(f"Accounted Time: {1 - (total_time - agent._reset_time - agent._gen_time - agent._decode_time - agent._append_time - env_time) / total_time:.2%}")
     print(f"Turns per second: {total_count / total_time}")
 
 

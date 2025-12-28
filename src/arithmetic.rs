@@ -109,52 +109,9 @@ impl EnvInstance for ArithmeticEnvInstance {
     }
 }
 
-// #[pyclass]
-// pub struct ArithmeticEnv {
-//     envs: Envs<ArithmeticEnvInstance>,
-// }
-
-// #[pymethods]
-// impl ArithmeticEnv {
-//     #[new]
-//     fn new(num_agents: usize) -> Self {
-//         Self { envs: Envs::new(0, num_agents, &ArithmeticSettings {}) }
-//     }
-
-//     fn reset<'py>(&mut self, batch_indices: PyReadonlyArray1<'py, i32>) -> PyResult<Vec<String>> {
-//         let indices = batch_indices.as_array();
-//         let result = self.envs.reset(indices);
-//         Ok(result)
-//     }
-
-//     fn step<'py>(
-//         &mut self,
-//         py: Python<'py>,
-//         batch_indices: PyReadonlyArray1<'py, i32>,
-//         actions: Vec<String>,
-//     ) -> PyResult<(Vec<String>, Bound<'py, PyArray1<f32>>, Bound<'py, PyArray1<bool>>)> {
-//         let indices = batch_indices.as_array();
-
-//         let (obs, rewards, dones) = self.envs.step(&indices, &actions);
-        
-//         let rewards: Bound<'py, PyArray1<f32>> = rewards.into_pyarray(py);
-//         let dones: Bound<'py, PyArray1<bool>> = dones.into_pyarray(py);
-
-//         Ok((obs, rewards, dones))
-//     }
-
-//     fn instructions(&self) -> PyResult<&'static str> {
-//         Ok(
-//             "Solve the arithmetic expression using +, -, * or /. Show your work if needed, but end with only the numeric result on its own line. Always output with decimals such as 123.456",
-//         )
-//     }
-// }
-
-
-// Create the wrapper for Arithmetic
 create_env_wrapper!(
-    ArithmeticEnv,                  // Python Class Name
-    ArithmeticEnvInstance,          // Rust Inner Type
-    ArithmeticSettings {},          // Settings Expression
-    "Solve the arithmetic expression using +, -, * or /. Show your work if needed, but end with only the numeric result on its own line. Always output with decimals such as 123.456" // Instructions
+    ArithmeticEnv,
+    ArithmeticEnvInstance,
+    ArithmeticSettings {},
+    "Solve the arithmetic expression using +, -, * or /. Show your work if needed, but end with only the numeric result on its own line. Always output with decimals such as 123.456"
 );

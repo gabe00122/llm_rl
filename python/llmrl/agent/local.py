@@ -15,8 +15,10 @@ from llmrl.chat import (
     reset_episodes,
     reset_generation_state,
     append_prompt_tokens,
-    append_user_prompts
+    append_user_prompts,
+    GenerationState
 )
+from llmrl.rollout import Rollout
 import numpy as np
 from transformers import PreTrainedTokenizerFast
 
@@ -48,7 +50,7 @@ class LocalAgent(Agent):
         )
 
         # v this count be wrapped as a convenience function
-        self._instruction_tokens = encode_input(
+        instruction_tokens = encode_input(
             tokenizer,
             [
                 [{"role": "system", "content": self._instructions}]
@@ -58,12 +60,15 @@ class LocalAgent(Agent):
         )
         self._gen = append_prompt_tokens(
             self._gen,
-            jnp.arange(self._agent_count, dtype=jnp.int32),
-            self._instruction_tokens,
+            np.arange(self._agent_count, dtype=jnp.int32),
+            instruction_tokens,
         )
         self._gen = self._gen._replace(
             env_instruction_length=self._gen.context_length.copy(),
         )
+        self._rewards = np.zeros(shape, dtype=np.float32)
+
+        self._rollout = Rollout(agent_count, max_context_length)
 
         self._reset_time = 0.0
         self._append_time = 0.0
@@ -84,20 +89,39 @@ class LocalAgent(Agent):
     @override
     def act(
         self, batch_indices: np.ndarray, obs: list[str], rewards: jax.Array, dones: np.ndarray
-    ) -> tuple[jax.Array, list[str]]:
-        reset_start = time.perf_counter()
+    ) -> tuple[np.ndarray, list[str]]:
+        
+        # debug
+        context_length = np.array(self._gen.context_length)
+        self._rewards[batch_indices, context_length[batch_indices] - 1] = rewards
+
+        done_idx = batch_indices[np.where(dones)]
+
         if dones.any():
+            self._rollout.store(
+                done_idx,
+                np.array(self._gen.context),
+                context_length,
+                self._rewards,
+                np.array(self._gen.values),
+                np.array(self._gen.log_probs),
+                np.array(self._gen.prompt_mask)
+            )
+
+            reset_start = time.perf_counter()
             done_mask = np.zeros((self._agent_count,), np.bool_)
             done_mask[batch_indices] = dones
-            self._gen = reset_episodes(self._gen, done_mask)
-        self._reset_time += time.perf_counter() - reset_start
+            self._gen: GenerationState = reset_episodes(self._gen, done_mask)
+            self._reset_time += time.perf_counter() - reset_start
+            
+            self._rewards[done_idx] = 0.0
         
         append_start = time.perf_counter()
         self._gen = append_user_prompts(self._gen, batch_indices, self._tokenizer, obs)
         self._append_time += time.perf_counter() - append_start
         
         gen_start = time.perf_counter()
-        self._gen = generate(self._model_def, self._model_state, "simple", self._gen)
+        self._gen = generate(self._model_def, self._model_state, "simple", self._gen, 3)
         self._gen_time += time.perf_counter() - gen_start
 
         decode_start = time.perf_counter()

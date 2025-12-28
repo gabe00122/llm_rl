@@ -26,10 +26,10 @@ impl<E: EnvInstance> Envs<E> {
         Self { envs }
     }
 
-    pub fn reset<'a>(&mut self, indices: impl IntoIterator<Item=&'a i32>) -> Vec<String> {
+    pub fn reset<I>(&mut self, indices: I) -> Vec<String> where I: IntoIterator, I::Item: Borrow<i32> {
         indices
             .into_iter()
-            .map(|&i| self.envs.get_mut(i as usize).unwrap().reset())
+            .map(|i| self.envs.get_mut(*i.borrow() as usize).unwrap().reset())
             .collect()
     }
 
