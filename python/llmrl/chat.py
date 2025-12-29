@@ -208,7 +208,6 @@ def generate(
             # prob = dist.prob(sample_tokens)
             # next_log_probs = next_log_probs.at[batch_range, carry.kv_cache_length].set(log_prob)
             next_log_probs = batched_put(next_log_probs, carry.kv_cache_length, log_prob)
-            jax.debug.print("{}", log_prob)
 
         else:
             sample_tokens = sample(sampling, logits.squeeze(axis=-2), sample_key)

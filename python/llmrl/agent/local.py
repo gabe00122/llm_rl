@@ -19,7 +19,9 @@ from llmrl.chat import (
     GenerationState
 )
 from llmrl.rollout import Rollout
+from llmrl.update_step import update_step
 import numpy as np
+import optax
 from transformers import PreTrainedTokenizerFast
 
 
@@ -28,6 +30,8 @@ class LocalAgent(Agent):
         self,
         model_def,
         model_state,
+        opt_def,
+        opt_state,
         tokenizer: PreTrainedTokenizerFast,
         agent_count: int,
         max_context_length: int,
@@ -36,6 +40,8 @@ class LocalAgent(Agent):
     ):
         self._model_def = model_def
         self._model_state = model_state
+        self._opt_def = opt_def
+        self._opt_state = opt_state
         self._tokenizer = tokenizer
         self._agent_count = agent_count
         self._max_context_length = max_context_length
@@ -68,7 +74,7 @@ class LocalAgent(Agent):
         )
         self._rewards = np.zeros(shape, dtype=np.float32)
 
-        self._rollout = Rollout(agent_count, max_context_length)
+        self._rollout = Rollout(4, max_context_length)
 
         self._reset_time = 0.0
         self._append_time = 0.0
@@ -107,6 +113,9 @@ class LocalAgent(Agent):
                 np.array(self._gen.log_probs),
                 np.array(self._gen.prompt_mask)
             )
+            if self._rollout.is_full:
+                self._opt_state, self._model_state = update_step(self._opt_def, self._opt_state, self._model_def, self._model_state, self._rollout.create_update_batch())
+                self._rollout._batch_index = 0
 
             reset_start = time.perf_counter()
             done_mask = np.zeros((self._agent_count,), np.bool_)

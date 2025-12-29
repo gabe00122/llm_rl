@@ -2,6 +2,7 @@ import os
 import time
 
 from jax import numpy as jnp
+from llmrl.model.value_network import ValueParam
 import numpy as np
 from flax import nnx
 
@@ -14,24 +15,29 @@ from llmrl.agent.local import LocalAgent
 from llmrl.checkpoint import load_model
 from llmrl.config import LoraConfig
 from llmrl.model import Qwen3
+import optax
 
 
 def main():
     model_path = "./base-models/Qwen3-4B-Instruct-2507"
-    lora_config = LoraConfig(False, False, 0)
+    lora_config = LoraConfig(True, True, 16)
     rngs = nnx.Rngs(0)
     model, tokenizer, sampling = load_model(model_path, lora_config, rngs)
 
-    batch_size = 128
+    batch_size = 64
     seq_length = 512  # 16384 #512
 
     env: Env = ArithmeticEnv(batch_size)
 
+    opt = nnx.Optimizer(model=model, tx=optax.adamw(0.0005), wrt=nnx.Any(ValueParam, nnx.LoRAParam))
     model_def, model_state = nnx.split(model)
+    opt_def, opt_state = nnx.split(opt)
 
     agent = LocalAgent(
         model_def,
         model_state,
+        opt_def,
+        opt_state,
         tokenizer,
         batch_size,
         seq_length,
@@ -51,7 +57,7 @@ def main():
     env_time = 0.0
 
     start = time.time()
-    for _ in range(1000):
+    for _ in range(10000):
         env_indices, actions = agent.act(env_indices, obs, rewards, dones)
 
         env_start = time.perf_counter()

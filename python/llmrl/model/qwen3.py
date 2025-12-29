@@ -74,7 +74,7 @@ class Qwen3(nnx.Module):
         tokens: jax.Array,
         positions: jax.Array,
         carry: tuple[KVCache, ...] | None = None,
-    ) -> tuple[jax.Array, tuple[KVCache, ...] | None]:
+    ) -> tuple[jax.Array, jax.Array, tuple[KVCache, ...] | None]:
         x = self.embeddings(tokens)
 
         if carry is not None:
