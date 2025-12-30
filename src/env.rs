@@ -66,7 +66,7 @@ macro_rules! create_env_wrapper {
             #[new]
             fn new(num_agents: usize) -> Self {
                 Self { 
-                    envs: Envs::new(0, num_agents, &$settings) 
+                    envs: Envs::new(1, num_agents, &$settings) 
                 }
             }
 

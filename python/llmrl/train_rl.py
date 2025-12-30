@@ -20,7 +20,7 @@ import optax
 
 def main():
     model_path = "./base-models/Qwen3-4B-Instruct-2507"
-    lora_config = LoraConfig(True, True, 16)
+    lora_config = LoraConfig(True, False, 16)
     rngs = nnx.Rngs(0)
     model, tokenizer, sampling = load_model(model_path, lora_config, rngs)
 
@@ -29,7 +29,7 @@ def main():
 
     env: Env = ArithmeticEnv(batch_size)
 
-    opt = nnx.Optimizer(model=model, tx=optax.adamw(0.0005), wrt=nnx.Any(ValueParam, nnx.LoRAParam))
+    opt = nnx.Optimizer(model=model, tx=optax.adamw(0.000002), wrt=nnx.Any(ValueParam, nnx.LoRAParam))
     model_def, model_state = nnx.split(model)
     opt_def, opt_state = nnx.split(opt)
 
@@ -57,7 +57,7 @@ def main():
     env_time = 0.0
 
     start = time.time()
-    for _ in range(10000):
+    while total_count < 50000:
         env_indices, actions = agent.act(env_indices, obs, rewards, dones)
 
         env_start = time.perf_counter()
@@ -66,9 +66,10 @@ def main():
 
         correct_count += rewards.sum().item()
         total_count += rewards.size
+        print(f"Score: {rewards.sum().item() / rewards.size:.2%}")
 
     total_time = time.time() - start
-    print(f"Perfect Correct: {correct_count / total_count:.2%}")
+    print(f"Percent Correct: {correct_count / total_count:.2%}")
 
     print(f"Delta: {total_time}")
     print(f"Total Episodes: {total_count}")

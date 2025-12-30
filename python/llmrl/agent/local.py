@@ -18,7 +18,7 @@ from llmrl.chat import (
     append_user_prompts,
     GenerationState
 )
-from llmrl.rollout import Rollout
+from llmrl.rollout import UpdateBuffer
 from llmrl.update_step import update_step
 import numpy as np
 import optax
@@ -74,7 +74,7 @@ class LocalAgent(Agent):
         )
         self._rewards = np.zeros(shape, dtype=np.float32)
 
-        self._rollout = Rollout(4, max_context_length)
+        self._rollout = UpdateBuffer(32, 4, max_context_length)
 
         self._reset_time = 0.0
         self._append_time = 0.0
@@ -98,8 +98,8 @@ class LocalAgent(Agent):
     ) -> tuple[np.ndarray, list[str]]:
         
         # debug
-        context_length = np.array(self._gen.context_length)
-        self._rewards[batch_indices, context_length[batch_indices] - 1] = rewards
+        kv_cache_lengths = np.array(self._gen.kv_cache_length)
+        self._rewards[batch_indices, kv_cache_lengths[batch_indices]] = rewards
 
         done_idx = batch_indices[np.where(dones)]
 
@@ -107,15 +107,18 @@ class LocalAgent(Agent):
             self._rollout.store(
                 done_idx,
                 np.array(self._gen.context),
-                context_length,
+                kv_cache_lengths,
                 self._rewards,
                 np.array(self._gen.values),
                 np.array(self._gen.log_probs),
-                np.array(self._gen.prompt_mask)
+                np.array(self._gen.policy_mask)
             )
-            if self._rollout.is_full:
-                self._opt_state, self._model_state = update_step(self._opt_def, self._opt_state, self._model_def, self._model_state, self._rollout.create_update_batch())
-                self._rollout._batch_index = 0
+            while self._rollout.has_batch:
+                ub = self._rollout.take_batch()
+                self._opt_state, self._model_state = update_step(self._opt_def, self._opt_state, self._model_def, self._model_state, ub)
+
+                first_ctx = self._tokenizer.decode(ub.context[0, :ub.kv_cache_lengths[0]])
+                print(first_ctx)
 
             reset_start = time.perf_counter()
             done_mask = np.zeros((self._agent_count,), np.bool_)
@@ -130,7 +133,7 @@ class LocalAgent(Agent):
         self._append_time += time.perf_counter() - append_start
         
         gen_start = time.perf_counter()
-        self._gen = generate(self._model_def, self._model_state, "simple", self._gen, 3)
+        self._gen = generate(self._model_def, self._model_state, "simple", self._gen, 4)
         self._gen_time += time.perf_counter() - gen_start
 
         decode_start = time.perf_counter()

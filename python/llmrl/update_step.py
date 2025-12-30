@@ -5,7 +5,7 @@ from jax import numpy as jnp
 from flax import nnx
 from llmrl.model.qwen3 import Qwen3
 from llmrl.model.value_network import ValueParam
-from llmrl.rollout import Rollout, UpdateBatch
+from llmrl.rollout import UpdateBuffer, UpdateBatch
 from einops import rearrange
 
 
@@ -21,11 +21,13 @@ def calculate_advantages(
         acc = rewards + discount * ((1 - gae_lambda) * v_tp1 + gae_lambda * acc)
         return acc, acc
 
+    rolled_values = jnp.roll(values, -1, axis=1).at[:, -1].set(0)
+
     # swap to time major
     _, targets = jax.lax.scan(
         _body,
         jnp.zeros((rewards.shape[0],), dtype=jnp.float32),
-        (jnp.swapaxes(rewards, 0, 1), jnp.swapaxes(values, 0, 1)),
+        (jnp.swapaxes(rewards, 0, 1), jnp.swapaxes(rolled_values, 0, 1)),
         reverse=True,
     )
     targets = jnp.swapaxes(targets, 0, 1)
@@ -41,18 +43,26 @@ def calculate_advantages(
     return advantages, targets
 
 def loss_fn(model: Qwen3, rollout: UpdateBatch, advantages: jax.Array, targets: jax.Array):
-    positions = jnp.arange(rollout.context.shape[1], dtype=jnp.int32)
+    batch_len, seq_len = rollout.context.shape
+    
+    positions = jnp.arange(seq_len, dtype=jnp.int32)[None, :]
+    positions = jnp.repeat(positions, batch_len, 0)
+
     logits, values, _ = model(rollout.context, positions)
 
-    # policy = distrax.Categorical(logits=logits[:, :-1])
+    policy = distrax.Categorical(logits=logits[:, :-1, :])
 
-    # log_prob = policy.log_prob(rollout.context[:, 1:])
+    log_prob = policy.log_prob(rollout.context[:, 1:])
 
-    value_loss = 0.5 * jnp.square(values - targets).mean(where=rollout.prompt_mask)
+    value_loss = 0.5 * jnp.square(values - targets).mean(where=rollout.policy_mask)
+    actor_loss = (-log_prob * advantages[:, :-1]).mean(where=rollout.policy_mask[:, :-1])
 
-    jax.debug.print("Loss: {}", value_loss)
+    # entropy_loss = -0.002 * policy.entropy().mean(where=rollout.policy_mask[:, :-1])
 
-    return value_loss
+    jax.debug.print("V Loss: {}", value_loss)
+    jax.debug.print("A Loss: {}", actor_loss)
+
+    return value_loss + actor_loss #+ entropy_loss
 
 
 def minibatch_update(optimizer: nnx.Optimizer, model: Qwen3, rollout: UpdateBatch, advantages: jax.Array, targets: jax.Array):
@@ -71,21 +81,17 @@ def update_step(opt_def, opt_state, model_def, model_state, rollout: UpdateBatch
 
     # batch_range = jnp.arange(batch_len, dtype=jnp.int32)
     seq_range = jnp.arange(seq_len, dtype=jnp.int32)
-    policy_mask = jnp.logical_and(rollout.prompt_mask, seq_range[None, :] < rollout.context_lengths[:, None])
+    policy_mask = jnp.logical_and(rollout.policy_mask, seq_range[None, :] < rollout.kv_cache_lengths[:, None])
 
     values = jnp.where(policy_mask, rollout.values, 0.0)
 
     rollout = rollout._replace(
-        prompt_mask=policy_mask,
+        policy_mask=policy_mask,
         values=values
     )
 
-    advantages, targets = calculate_advantages(rollout.rewards, values, 0.99, 0.9, False)
+    advantages, targets = calculate_advantages(rollout.rewards, values, 0.99, 0.95, False)
 
     minibatch_update(opt, model, rollout, advantages, targets)
-
-    # update_data = (rollout, advantages, targets)
-
-    # update_data = jax.tree.map()
 
     return nnx.state(opt), nnx.state(model)
