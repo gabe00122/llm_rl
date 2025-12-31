@@ -19,3 +19,6 @@ target
 *.so
 .uv-cache
 
+# logs
+logs/
+wandb/

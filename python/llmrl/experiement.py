@@ -5,7 +5,7 @@ import fsspec
 from pydantic import BaseModel
 from coolname import generate_slug
 
-from jaxrl.config import Config, load_config
+from llmrl.config import Config, load_config
 
 
 class ExperimentMeta(BaseModel):
