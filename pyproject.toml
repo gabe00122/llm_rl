@@ -17,6 +17,8 @@ dependencies = [
     "pydantic>=2.12.5",
     "rich>=14.2.0",
     "safetensors>=0.6.2",
+    "tensorboardX>=2.6.2.2",
+    "wandb>=0.19.1",
     "transformers>=4.57.1",
 ]
 

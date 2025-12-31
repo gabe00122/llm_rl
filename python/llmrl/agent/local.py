@@ -18,8 +18,9 @@ from llmrl.chat import (
     append_user_prompts,
     GenerationState
 )
-from llmrl.rollout import UpdateBuffer
+from llmrl.buffer import UpdateBuffer
 from llmrl.update_step import update_step
+from llmrl.logger import BaseLogger
 import numpy as np
 import optax
 from transformers import PreTrainedTokenizerFast
@@ -36,6 +37,7 @@ class LocalAgent(Agent):
         agent_count: int,
         max_context_length: int,
         instructions: str,
+        logger: BaseLogger,
         rng_key: jax.Array,
     ):
         self._model_def = model_def
@@ -46,6 +48,9 @@ class LocalAgent(Agent):
         self._agent_count = agent_count
         self._max_context_length = max_context_length
         self._instructions = instructions
+        self._logger = logger
+
+        self._update_step = 0
 
         self._rng_key = rng_key
 
@@ -74,7 +79,7 @@ class LocalAgent(Agent):
         )
         self._rewards = np.zeros(shape, dtype=np.float32)
 
-        self._rollout = UpdateBuffer(32, 4, max_context_length)
+        self._buffer = UpdateBuffer(32, 4, max_context_length)
 
         self._reset_time = 0.0
         self._append_time = 0.0
@@ -94,7 +99,7 @@ class LocalAgent(Agent):
 
     @override
     def act(
-        self, batch_indices: np.ndarray, obs: list[str], rewards: jax.Array, dones: np.ndarray
+        self, batch_indices: np.ndarray, obs: list[str], rewards: np.ndarray, dones: np.ndarray
     ) -> tuple[np.ndarray, list[str]]:
         
         # debug
@@ -104,7 +109,7 @@ class LocalAgent(Agent):
         done_idx = batch_indices[np.where(dones)]
 
         if dones.any():
-            self._rollout.store(
+            self._buffer.store(
                 done_idx,
                 np.array(self._gen.context),
                 kv_cache_lengths,
@@ -113,12 +118,16 @@ class LocalAgent(Agent):
                 np.array(self._gen.log_probs),
                 np.array(self._gen.policy_mask)
             )
-            while self._rollout.has_batch:
-                ub = self._rollout.take_batch()
-                self._opt_state, self._model_state = update_step(self._opt_def, self._opt_state, self._model_def, self._model_state, ub)
+            while self._buffer.has_batch:
+                ub = self._buffer.take_batch()
+                self._opt_state, self._model_state, metrics = update_step(self._opt_def, self._opt_state, self._model_def, self._model_state, ub)
 
-                first_ctx = self._tokenizer.decode(ub.context[0, :ub.kv_cache_lengths[0]])
-                print(first_ctx)
+                metrics["rewards"] = ub.rewards.sum() / ub.rewards.shape[0]
+
+                self._logger.log_dict(metrics, self._update_step)
+                self._update_step += 1
+                # first_ctx = self._tokenizer.decode(ub.context[0, :ub.kv_cache_lengths[0]])
+                # print(first_ctx)
 
             reset_start = time.perf_counter()
             done_mask = np.zeros((self._agent_count,), np.bool_)

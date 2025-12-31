@@ -2,12 +2,12 @@ from flax import nnx
 from jax import numpy as jnp
 import jax
 
-from llmrl.config import Config, LoraConfig
+from llmrl.config import LLMConfig, LoraConfig
 from llmrl.model.util import _load_param
 
 
 class MlpLayer(nnx.Module):
-    def __init__(self, config: Config, *, rngs: nnx.Rngs):
+    def __init__(self, config: LLMConfig, *, rngs: nnx.Rngs):
         super().__init__()
         self._embed_dim = config.embed
         self._ffw_dim = config.mlp_ffw_size

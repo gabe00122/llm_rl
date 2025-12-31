@@ -4,12 +4,12 @@ from jax import numpy as jnp
 import numpy as np
 
 class UpdateBatch(NamedTuple):
-    context: jax.Array
-    kv_cache_lengths: jax.Array
-    log_probs: jax.Array
-    values: jax.Array
-    rewards: jax.Array
-    policy_mask: jax.Array
+    context: np.ndarray
+    kv_cache_lengths: np.ndarray
+    log_probs: np.ndarray
+    values: np.ndarray
+    rewards: np.ndarray
+    policy_mask: np.ndarray
 
 
 

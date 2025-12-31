@@ -2,14 +2,14 @@ from flax import nnx
 import jax
 from jax import numpy as jnp
 
-from llmrl.config import Config, LoraConfig
+from llmrl.config import LLMConfig, LoraConfig
 from llmrl.model.attention import AttentionLayer, KVCache
 from llmrl.model.mlp import MlpLayer
 from llmrl.model.util import _load_param
 
 
 class Qwen3Layer(nnx.Module):
-    def __init__(self, config: Config, *, rngs: nnx.Rngs):
+    def __init__(self, config: LLMConfig, *, rngs: nnx.Rngs):
         super().__init__()
         self.attn = AttentionLayer(config, rngs=rngs)
         self.mlp = MlpLayer(config, rngs=rngs)

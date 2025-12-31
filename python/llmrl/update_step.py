@@ -5,8 +5,7 @@ from jax import numpy as jnp
 from flax import nnx
 from llmrl.model.qwen3 import Qwen3
 from llmrl.model.value_network import ValueParam
-from llmrl.rollout import UpdateBuffer, UpdateBatch
-from einops import rearrange
+from llmrl.buffer import UpdateBatch
 
 
 class UpdateSettings(NamedTuple):
@@ -42,34 +41,30 @@ def calculate_advantages(
 
     return advantages, targets
 
-def loss_fn(model: Qwen3, rollout: UpdateBatch, advantages: jax.Array, targets: jax.Array):
+def loss_fn(model: Qwen3, rollout: UpdateBatch, advantages: jax.Array, targets: jax.Array) -> tuple[jax.Array, dict[str, jax.Array]]:
     batch_len, seq_len = rollout.context.shape
     
     positions = jnp.arange(seq_len, dtype=jnp.int32)[None, :]
     positions = jnp.repeat(positions, batch_len, 0)
 
-    logits, values, _ = model(rollout.context, positions)
+    logits, values, _ = model(jnp.asarray(rollout.context), positions)
 
     policy = distrax.Categorical(logits=logits[:, :-1, :])
 
     log_prob = policy.log_prob(rollout.context[:, 1:])
 
     value_loss = 0.5 * jnp.square(values - targets).mean(where=rollout.policy_mask)
-    actor_loss = (-log_prob * advantages[:, :-1]).mean(where=rollout.policy_mask[:, :-1])
+    actor_loss = -(log_prob * advantages[:, :-1]).mean(where=rollout.policy_mask[:, :-1])
+    loss = value_loss + actor_loss
 
     # entropy_loss = -0.002 * policy.entropy().mean(where=rollout.policy_mask[:, :-1])
 
-    jax.debug.print("V Loss: {}", value_loss)
-    jax.debug.print("A Loss: {}", actor_loss)
+    metrics = {
+        'value_loss': value_loss,
+        'actor_loss': actor_loss
+    }
 
-    return value_loss + actor_loss #+ entropy_loss
-
-
-def minibatch_update(optimizer: nnx.Optimizer, model: Qwen3, rollout: UpdateBatch, advantages: jax.Array, targets: jax.Array):
-    diff = nnx.DiffState(0, nnx.Any(ValueParam, nnx.LoRAParam))
-    grad = nnx.grad(loss_fn, argnums=diff)(model, rollout, advantages, targets)
-
-    optimizer.update(model, grad)
+    return loss, metrics
 
 
 @jax.jit(static_argnames=('opt_def', 'model_def'), donate_argnames=('opt_state', 'model_state'))
@@ -90,8 +85,12 @@ def update_step(opt_def, opt_state, model_def, model_state, rollout: UpdateBatch
         values=values
     )
 
-    advantages, targets = calculate_advantages(rollout.rewards, values, 0.99, 0.95, False)
+    advantages, targets = calculate_advantages(jnp.asarray(rollout.rewards), values, 0.99, 0.95, False)
 
-    minibatch_update(opt, model, rollout, advantages, targets)
+    # do the update
+    diff = nnx.DiffState(0, nnx.Any(ValueParam, nnx.LoRAParam))
+    grad, metrics = nnx.grad(loss_fn, argnums=diff, has_aux=True)(model, rollout, advantages, targets)
 
-    return nnx.state(opt), nnx.state(model)
+    opt.update(model, grad)
+
+    return nnx.state(opt), nnx.state(model), metrics

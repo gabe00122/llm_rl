@@ -4,7 +4,7 @@ import jax
 from flax import nnx
 from jax import numpy as jnp
 
-from llmrl.config import Config, LoraConfig
+from llmrl.config import LLMConfig, LoraConfig
 from llmrl.model.lora import LoRAGeneral
 from llmrl.model.util import _load_param
 from llmrl.rope import apply_rope
@@ -17,7 +17,7 @@ class KVCache(NamedTuple):
 
 
 class AttentionLayer(nnx.Module):
-    def __init__(self, config: Config, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: LLMConfig, *, rngs: nnx.Rngs) -> None:
         super().__init__()
 
         self._num_kv_heads = config.kv_heads

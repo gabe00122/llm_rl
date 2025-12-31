@@ -4,7 +4,7 @@ import jax
 from flax import nnx
 from jax import numpy as jnp
 
-from llmrl.config import Config, LoraConfig
+from llmrl.config import LLMConfig, LoraConfig
 from llmrl.model.attention import KVCache
 from llmrl.model.layer import Qwen3Layer
 from llmrl.model.util import _load_param
@@ -14,7 +14,7 @@ from llmrl.model.value_network import ValueNetwork
 class Qwen3(nnx.Module):
     def __init__(
         self,
-        config: Config,
+        config: LLMConfig,
         *,
         rngs: nnx.Rngs,
     ):

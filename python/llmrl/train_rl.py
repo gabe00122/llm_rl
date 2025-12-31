@@ -13,12 +13,18 @@ from llmrl.agent.lite import LiteAgent
 # from llmrl.env.basic_arithmetic import BasicArithmeticEnv
 from llmrl.agent.local import LocalAgent
 from llmrl.checkpoint import load_model
-from llmrl.config import LoraConfig
-from llmrl.model import Qwen3
+from llmrl.config import LoraConfig, LoggerConfig
+from llmrl.logger import create_logger
+from rich.console import Console
+from datetime import datetime
 import optax
 
 
 def main():
+    console = Console()
+    logger_config = LoggerConfig(use_console=True, use_tb=False, use_wandb=True)
+    logger = create_logger(logger_config, "test", console)
+
     model_path = "./base-models/Qwen3-4B-Instruct-2507"
     lora_config = LoraConfig(True, False, 16)
     rngs = nnx.Rngs(0)
@@ -42,12 +48,13 @@ def main():
         batch_size,
         seq_length,
         env.instructions(),
+        logger,
         rngs.agent(),
     )
-    
+
     env_indices = np.arange(batch_size, dtype=np.int32)
-    rewards = jnp.zeros((batch_size,), dtype=np.float32)
-    dones = jnp.zeros((batch_size,), dtype=jnp.bool_)
+    rewards = np.zeros((batch_size,), dtype=np.float32)
+    dones = np.zeros((batch_size,), dtype=jnp.bool_)
 
     obs = env.reset(env_indices)
 
@@ -66,7 +73,7 @@ def main():
 
         correct_count += rewards.sum().item()
         total_count += rewards.size
-        print(f"Score: {rewards.sum().item() / rewards.size:.2%}")
+        # print(f"Score: {rewards.sum().item() / rewards.size:.2%}")
 
     total_time = time.time() - start
     print(f"Percent Correct: {correct_count / total_count:.2%}")

@@ -205,7 +205,7 @@ def generate(
         elif sampling == "simple":
             dist = Categorical(logits=logits.squeeze(-2))
             sample_tokens: jax.Array = dist.sample(seed=sample_key)
-            log_prob = dist.log_prob(sample_tokens)
+            log_prob: jax.Array = dist.log_prob(sample_tokens)
             # prob = dist.prob(sample_tokens)
             # next_log_probs = next_log_probs.at[batch_range, carry.kv_cache_length].set(log_prob)
             next_log_probs = batched_put(next_log_probs, carry.kv_cache_length, log_prob)
@@ -278,7 +278,7 @@ def chat(
             gen = reset_generation_state(gen)
             continue
 
-        text = [{"role": "user", "content": prompt} for _ in range(batch_size)]
+        text = [[{"role": "user", "content": prompt}] for _ in range(batch_size)]
         prompt_tokens = encode_input(tokenizer, text)
 
         start_time = time.time()

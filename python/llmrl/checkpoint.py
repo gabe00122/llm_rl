@@ -10,7 +10,7 @@ from jax.sharding import Mesh
 from rich.progress import track
 from safetensors import safe_open
 
-from llmrl.config import LoraConfig, load_config, load_sampling_config
+from llmrl.config import LoraConfig, load_hf_llm_config, load_sampling_config
 from llmrl.model import Qwen3
 from llmrl.util import load_tokenizer
 
@@ -45,7 +45,7 @@ def load_safetensors(file_path: str):
 
 
 def load_model(model_path: str, lora_config: LoraConfig, rngs: nnx.Rngs):
-    config = load_config(f"{model_path}/config.json")
+    config = load_hf_llm_config(f"{model_path}/config.json")
     params = load_safetensors(model_path)
     tokenizer = load_tokenizer(model_path)
     sampling = load_sampling_config(f"{model_path}/generation_config.json")
