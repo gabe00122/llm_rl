@@ -15,7 +15,7 @@ from rich.markdown import Markdown
 
 from llmrl.config import LoraConfig, SamplingConfig
 from llmrl.model import Qwen3
-from llmrl.checkpoint import load_model
+from llmrl.base_model_loader import load_model
 
 PAD_ID = 151643
 EOS_1 = 151645
@@ -298,7 +298,7 @@ def main():
     # model_path = "./base-models/qwen3-0.6b"
     model_path = "./base-models/Qwen3-4B-Instruct-2507"
     # model_path = "./base-models/Qwen3-4B-Thinking-2507"
-    lora_config = LoraConfig(False, False, 0)
+    lora_config = LoraConfig()
     rngs = nnx.Rngs(0)
     model, tokenizer, sampling = load_model(model_path, lora_config, rngs)
 

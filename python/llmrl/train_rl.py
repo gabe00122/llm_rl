@@ -12,7 +12,7 @@ from llmrl.agent.lite import LiteAgent
 
 # from llmrl.env.basic_arithmetic import BasicArithmeticEnv
 from llmrl.agent.local import LocalAgent
-from llmrl.checkpoint import load_model
+from llmrl.checkpointer import load_model
 from llmrl.config import LoraConfig, LoggerConfig
 from llmrl.logger import create_logger
 from rich.console import Console
@@ -26,7 +26,7 @@ def main():
     logger = create_logger(logger_config, "test", console)
 
     model_path = "./base-models/Qwen3-4B-Instruct-2507"
-    lora_config = LoraConfig(True, False, 16)
+    lora_config = LoraConfig(mlp=True, rank=16)
     rngs = nnx.Rngs(0)
     model, tokenizer, sampling = load_model(model_path, lora_config, rngs)
 

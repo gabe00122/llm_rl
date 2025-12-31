@@ -4,10 +4,10 @@ import jax
 from flax import nnx
 from jax import numpy as jnp
 
-from llmrl.config import LLMConfig, LoraConfig
+from llmrl.config import LoraConfig, LLMConfig
 from llmrl.model.attention import KVCache
 from llmrl.model.layer import Qwen3Layer
-from llmrl.model.util import _load_param
+from llmrl.model.util import load_param
 from llmrl.model.value_network import ValueNetwork
 
 
@@ -67,7 +67,7 @@ class Qwen3(nnx.Module):
             layer_params = params["model"]["layers"][f"{i}"]
             layer.load_params(layer_params)
 
-        _load_param(self.final_norm.scale, params["model"]["norm"]["weight"])
+        load_param(self.final_norm.scale, params["model"]["norm"]["weight"])
 
     def __call__(
         self,
