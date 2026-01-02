@@ -2,12 +2,12 @@ from flax import nnx
 from jax import numpy as jnp
 import jax
 
-from llmrl.config import Config, LoraConfig
-from llmrl.model.util import _load_param
+from llmrl.config import LoraConfig, LLMConfig
+from llmrl.model.util import load_param
 
 
 class MlpLayer(nnx.Module):
-    def __init__(self, config: Config, *, rngs: nnx.Rngs):
+    def __init__(self, config: LLMConfig, *, rngs: nnx.Rngs):
         super().__init__()
         self._embed_dim = config.embed
         self._ffw_dim = config.mlp_ffw_size
@@ -40,7 +40,7 @@ class MlpLayer(nnx.Module):
         self._use_lora = False
 
     def initialize_lora(self, lora_config: LoraConfig, *, rngs: nnx.Rngs):
-        if not lora_config.mlp_lora:
+        if not lora_config.mlp:
             self._use_lora = False
             return
 
@@ -72,9 +72,9 @@ class MlpLayer(nnx.Module):
 
     def load_params(self, params):
         # pass in the mlp dict
-        _load_param(self.up_gate.kernel, params["gate_proj"]["weight"].T)
-        _load_param(self.up_proj.kernel, params["up_proj"]["weight"].T)
-        _load_param(self.down_proj.kernel, params["down_proj"]["weight"].T)
+        load_param(self.up_gate.kernel, params["gate_proj"]["weight"].T)
+        load_param(self.up_proj.kernel, params["up_proj"]["weight"].T)
+        load_param(self.down_proj.kernel, params["down_proj"]["weight"].T)
 
     def __call__(self, inputs):
         up = self.up_proj(inputs)

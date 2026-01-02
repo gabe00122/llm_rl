@@ -4,17 +4,17 @@ import jax
 from flax import nnx
 from jax import numpy as jnp
 
-from llmrl.config import Config, LoraConfig
+from llmrl.config import LoraConfig, LLMConfig
 from llmrl.model.attention import KVCache
 from llmrl.model.layer import Qwen3Layer
-from llmrl.model.util import _load_param
+from llmrl.model.util import load_param
 from llmrl.model.value_network import ValueNetwork
 
 
 class Qwen3(nnx.Module):
     def __init__(
         self,
-        config: Config,
+        config: LLMConfig,
         *,
         rngs: nnx.Rngs,
     ):
@@ -48,7 +48,7 @@ class Qwen3(nnx.Module):
             rngs=rngs,
         )
 
-        self.value_net = ValueNetwork(config.embed, 512, rngs=rngs)
+        self.value_net = ValueNetwork(config.embed, 2048, rngs=rngs)
 
     def initialize_lora(self, lora_config: LoraConfig, *, rngs: nnx.Rngs):
         for layer in self.layers:
@@ -67,24 +67,26 @@ class Qwen3(nnx.Module):
             layer_params = params["model"]["layers"][f"{i}"]
             layer.load_params(layer_params)
 
-        _load_param(self.final_norm.scale, params["model"]["norm"]["weight"])
+        load_param(self.final_norm.scale, params["model"]["norm"]["weight"])
 
     def __call__(
         self,
         tokens: jax.Array,
         positions: jax.Array,
         carry: tuple[KVCache, ...] | None = None,
-    ) -> tuple[jax.Array, tuple[KVCache, ...] | None]:
+    ) -> tuple[jax.Array, jax.Array, tuple[KVCache, ...] | None]:
         x = self.embeddings(tokens)
 
         if carry is not None:
             out_carry = []
             for layer, layer_carry_in in zip(self.layers, carry):
+                last_x = x
                 x, layer_carry_out = layer(x, positions, layer_carry_in)
                 out_carry.append(layer_carry_out)
             carry = tuple(out_carry)
         else:
             for layer in self.layers:
+                last_x = x
                 x, _ = layer(x, positions)
 
         x = self.final_norm(x)
@@ -92,7 +94,7 @@ class Qwen3(nnx.Module):
 
         logits = logits.astype(jnp.float32)
 
-        value = self.value_net(x)
+        value = self.value_net(last_x)
 
         return logits, value, carry
 

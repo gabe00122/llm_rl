@@ -2,14 +2,14 @@ from flax import nnx
 import jax
 from jax import numpy as jnp
 
-from llmrl.config import Config, LoraConfig
+from llmrl.config import LoraConfig, LLMConfig
 from llmrl.model.attention import AttentionLayer, KVCache
 from llmrl.model.mlp import MlpLayer
-from llmrl.model.util import _load_param
+from llmrl.model.util import load_param
 
 
 class Qwen3Layer(nnx.Module):
-    def __init__(self, config: Config, *, rngs: nnx.Rngs):
+    def __init__(self, config: LLMConfig, *, rngs: nnx.Rngs):
         super().__init__()
         self.attn = AttentionLayer(config, rngs=rngs)
         self.mlp = MlpLayer(config, rngs=rngs)
@@ -50,8 +50,8 @@ class Qwen3Layer(nnx.Module):
         return self.attn.initialize_carry(batch_size, seq_length)
 
     def load_params(self, params):
-        _load_param(self.attn_pre_norm.scale, params["input_layernorm"]["weight"])
-        _load_param(
+        load_param(self.attn_pre_norm.scale, params["input_layernorm"]["weight"])
+        load_param(
             self.attn_post_norm.scale, params["post_attention_layernorm"]["weight"]
         )
         self.attn.load_params(params["self_attn"])

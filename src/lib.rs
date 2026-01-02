@@ -1,6 +1,6 @@
 mod arithmetic;
-mod wordle;
 mod env;
+mod wordle;
 
 /// A Python module implemented in Rust.
 #[pyo3::pymodule]

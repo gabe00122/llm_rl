@@ -4,10 +4,10 @@ import jax
 from flax import nnx
 from jax import numpy as jnp
 
-from llmrl.config import Config, LoraConfig
+from llmrl.config import LoraConfig, LLMConfig
 from llmrl.model.lora import LoRAGeneral
-from llmrl.model.util import _load_param
-from llmrl.rope import apply_rope
+from llmrl.model.util import load_param
+from llmrl.model.rope import apply_rope
 from llmrl.util import batched_put
 
 
@@ -17,7 +17,7 @@ class KVCache(NamedTuple):
 
 
 class AttentionLayer(nnx.Module):
-    def __init__(self, config: Config, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: LLMConfig, *, rngs: nnx.Rngs) -> None:
         super().__init__()
 
         self._num_kv_heads = config.kv_heads
@@ -81,7 +81,7 @@ class AttentionLayer(nnx.Module):
         self._use_lora = False
 
     def initialize_lora(self, lora_config: LoraConfig, *, rngs: nnx.Rngs):
-        if not lora_config.attn_lora:
+        if not lora_config.attn:
             self._use_lora = False
             return
 
@@ -179,10 +179,10 @@ class AttentionLayer(nnx.Module):
         v_proj = params["v_proj"]["weight"].T.reshape(self.value_proj.kernel.shape)
         o_proj = params["o_proj"]["weight"].T.reshape(self.out.kernel.shape)
 
-        _load_param(self.key_proj.kernel, k_proj)
-        _load_param(self.query_proj.kernel, q_proj)
-        _load_param(self.value_proj.kernel, v_proj)
-        _load_param(self.out.kernel, o_proj)
+        load_param(self.key_proj.kernel, k_proj)
+        load_param(self.query_proj.kernel, q_proj)
+        load_param(self.value_proj.kernel, v_proj)
+        load_param(self.out.kernel, o_proj)
 
-        _load_param(self.query_norm.scale, params["q_norm"]["weight"])
-        _load_param(self.key_norm.scale, params["k_norm"]["weight"])
+        load_param(self.query_norm.scale, params["q_norm"]["weight"])
+        load_param(self.key_norm.scale, params["k_norm"]["weight"])
