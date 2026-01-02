@@ -1,3 +1,4 @@
+from llmrl.config import Config
 import time
 from typing import override
 
@@ -34,8 +35,7 @@ class LocalAgent(Agent):
         opt_def,
         opt_state,
         tokenizer: PreTrainedTokenizerFast,
-        agent_count: int,
-        max_context_length: int,
+        config: Config
         instructions: str,
         logger: BaseLogger,
         rng_key: jax.Array,
@@ -45,8 +45,7 @@ class LocalAgent(Agent):
         self._opt_def = opt_def
         self._opt_state = opt_state
         self._tokenizer = tokenizer
-        self._agent_count = agent_count
-        self._max_context_length = max_context_length
+        self._config = config
         self._instructions = instructions
         self._logger = logger
 
@@ -54,10 +53,10 @@ class LocalAgent(Agent):
 
         self._rng_key = rng_key
 
-        shape = (self._agent_count, self._max_context_length)
+        shape = (self._config.eval_envs, self._config.max_seq_length)
         kv_cache = nnx.merge(self._model_def, self._model_state).initialize_carry(*shape)
         self._gen = create_generation_state(
-            kv_cache, self._agent_count, self._max_context_length, self._rng_key
+            kv_cache, self._config.eval_envs, self._config.max_seq_length, self._rng_key
         )
 
         # v this count be wrapped as a convenience function
@@ -65,13 +64,13 @@ class LocalAgent(Agent):
             tokenizer,
             [
                 [{"role": "system", "content": self._instructions}]
-                for _ in range(agent_count)
+                for _ in range(self._config.update_envs)
             ],
             False,
         )
         self._gen = append_prompt_tokens(
             self._gen,
-            np.arange(self._agent_count, dtype=jnp.int32),
+            np.arange(self._config.update_envs, dtype=jnp.int32),
             instruction_tokens,
         )
         self._gen = self._gen._replace(
@@ -79,7 +78,7 @@ class LocalAgent(Agent):
         )
         self._rewards = np.zeros(shape, dtype=np.float32)
 
-        self._buffer = UpdateBuffer(32, 4, max_context_length)
+        self._buffer = UpdateBuffer(self._config.update_envs * 4, self._config.update_envs, self._config.max_seq_length)
 
         self._reset_time = 0.0
         self._append_time = 0.0

@@ -1,3 +1,4 @@
+from llmrl.config import LossConfig
 from typing import NamedTuple
 import distrax
 import jax
@@ -41,19 +42,18 @@ def calculate_advantages(
 
     return advantages, targets
 
-def loss_fn(model: Qwen3, rollout: UpdateBatch, advantages: jax.Array, targets: jax.Array) -> tuple[jax.Array, dict[str, jax.Array]]:
+def loss_fn(model: Qwen3, rollout: UpdateBatch, advantages: jax.Array, targets: jax.Array, config: LossConfig) -> tuple[jax.Array, dict[str, jax.Array]]:
     batch_len, seq_len = rollout.context.shape
     
     positions = jnp.arange(seq_len, dtype=jnp.int32)[None, :]
     positions = jnp.repeat(positions, batch_len, 0)
 
     logits, values, _ = model(jnp.asarray(rollout.context), positions)
-
     policy = distrax.Categorical(logits=logits[:, :-1, :])
 
     log_prob = policy.log_prob(rollout.context[:, 1:])
 
-    value_loss = 0.5 * jnp.square(values - targets).mean(where=rollout.policy_mask)
+    value_loss = 0.5 * config.vf_coef * jnp.square(values - targets).mean(where=rollout.policy_mask)
     actor_loss = -(log_prob * advantages[:, :-1]).mean(where=rollout.policy_mask[:, :-1])
     loss = value_loss + actor_loss
 
@@ -67,14 +67,13 @@ def loss_fn(model: Qwen3, rollout: UpdateBatch, advantages: jax.Array, targets: 
     return loss, metrics
 
 
-@jax.jit(static_argnames=('opt_def', 'model_def'), donate_argnames=('opt_state', 'model_state'))
-def update_step(opt_def, opt_state, model_def, model_state, rollout: UpdateBatch):
+@jax.jit(static_argnames=('opt_def', 'model_def', 'config'), donate_argnames=('opt_state', 'model_state'))
+def update_step(opt_def, opt_state, model_def, model_state, rollout: UpdateBatch, config: LossConfig):
     opt = nnx.merge(opt_def, opt_state)
     model = nnx.merge(model_def, model_state)
 
     batch_len, seq_len = rollout.context.shape
 
-    # batch_range = jnp.arange(batch_len, dtype=jnp.int32)
     seq_range = jnp.arange(seq_len, dtype=jnp.int32)
     policy_mask = jnp.logical_and(rollout.policy_mask, seq_range[None, :] < rollout.kv_cache_lengths[:, None])
 
@@ -85,11 +84,11 @@ def update_step(opt_def, opt_state, model_def, model_state, rollout: UpdateBatch
         values=values
     )
 
-    advantages, targets = calculate_advantages(jnp.asarray(rollout.rewards), values, 0.99, 0.95, False)
+    advantages, targets = calculate_advantages(jnp.asarray(rollout.rewards), values, config.gea_discount, config.gea_lambda, False)
 
     # do the update
     diff = nnx.DiffState(0, nnx.Any(ValueParam, nnx.LoRAParam))
-    grad, metrics = nnx.grad(loss_fn, argnums=diff, has_aux=True)(model, rollout, advantages, targets)
+    grad, metrics = nnx.grad(loss_fn, argnums=diff, has_aux=True)(model, rollout, advantages, targets, config)
 
     opt.update(model, grad)
 

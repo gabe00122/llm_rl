@@ -33,6 +33,11 @@ class LoraConfig(BaseModel):
     rank: int = 0
 
 
+class ValueConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    width: int
+
+
 class TrainerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     eval_env: int
@@ -48,14 +53,37 @@ class LoggerConfig(BaseModel):
     use_wandb: bool = False
 
 
+class EnvConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    name: Literal["arithmetic", "wordle"]
+    settings: dict
+
+
+class OptimizerConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    lr: float
+
+
+class LossConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    gea_lambda: float
+    gea_discount: float
+    vf_coef: float
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     seed: int | Literal["random"] = "random"
     base_model: str
     lora: LoraConfig
     logger: LoggerConfig
+    optimizer: OptimizerConfig
+    loss: LossConfig
 
-    num_env: int
+    eval_envs: int
+    update_envs: int
+    max_seq_length: int
+    env: EnvConfig
 
 
 def load_config(json_config: str) -> Config:

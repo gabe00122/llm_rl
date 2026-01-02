@@ -9,7 +9,7 @@ import numpy as np
 from tensorboardX import SummaryWriter
 import wandb
 
-from llmrl.config import LoggerConfig
+from llmrl.config import LoggerConfig, Config
 
 Metrics = dict[str, jax.Array | float | int]
 
@@ -91,8 +91,8 @@ class ConsoleLogger(BaseLogger):
 
 
 class WandbLogger(BaseLogger):
-    def __init__(self, unique_token: str, settings: LoggerConfig):
-        wandb.init(project=settings.project_name, name=unique_token)
+    def __init__(self, unique_token: str, settings: Config):
+        wandb.init(project=settings.logger.project_name, name=unique_token)
 
     def log_dict(self, data: Metrics, step: int) -> None:
         normalized_data = json_normalize(data)
@@ -103,14 +103,14 @@ class WandbLogger(BaseLogger):
         wandb.finish()
 
 
-def create_logger(settings: LoggerConfig, unique_token: str, console: Console) -> BaseLogger:
+def create_logger(settings: Config, unique_token: str, console: Console) -> BaseLogger:
     loggers: list[BaseLogger] = []
 
-    if settings.use_tb:
+    if settings.logger.use_tb:
         loggers.append(TensorboardLogger(unique_token))
-    if settings.use_console:
+    if settings.logger.use_console:
         loggers.append(ConsoleLogger(unique_token, console))
-    if settings.use_wandb:
+    if settings.logger.use_wandb:
         loggers.append(WandbLogger(unique_token, settings))
 
     return MultiLogger(loggers)

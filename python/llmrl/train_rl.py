@@ -1,4 +1,4 @@
-import os
+from llmrl.experiement import Experiment
 import time
 
 from jax import numpy as jnp
@@ -7,35 +7,29 @@ import numpy as np
 from flax import nnx
 
 from llmrl._envs import ArithmeticEnv
-from llmrl.env.base import Env
-from llmrl.agent.lite import LiteAgent
-
-# from llmrl.env.basic_arithmetic import BasicArithmeticEnv
 from llmrl.agent.local import LocalAgent
-from llmrl.checkpointer import load_model
-from llmrl.config import LoraConfig, LoggerConfig
+from llmrl.base_model_loader import load_base_model
 from llmrl.logger import create_logger
+from llmrl.env.make import make_env
 from rich.console import Console
-from datetime import datetime
 import optax
 
 
 def main():
+    experiment = Experiment.from_config_file("configs/test.json", create_directories=False)
+    config = experiment.config
     console = Console()
-    logger_config = LoggerConfig(use_console=True, use_tb=False, use_wandb=True)
-    logger = create_logger(logger_config, "test", console)
+    logger = create_logger(config, experiment.unique_token, console)
 
-    model_path = "./base-models/Qwen3-4B-Instruct-2507"
-    lora_config = LoraConfig(mlp=True, rank=16)
+    model_name = "Qwen/Qwen3-4B-Instruct-2507"
     rngs = nnx.Rngs(0)
-    model, tokenizer, sampling = load_model(model_path, lora_config, rngs)
+    model, tokenizer, sampling = load_base_model(model_name, rngs)
 
-    batch_size = 64
-    seq_length = 512  # 16384 #512
+    eval_batch_size = config.eval_env
 
-    env: Env = ArithmeticEnv(batch_size)
+    env = make_env(config.env.name, eval_batch_size, experiment.environments_seed, config.env.settings)
 
-    opt = nnx.Optimizer(model=model, tx=optax.adamw(0.000002), wrt=nnx.Any(ValueParam, nnx.LoRAParam))
+    opt = nnx.Optimizer(model=model, tx=optax.adamw(config.optimizer.lr), wrt=nnx.Any(ValueParam, nnx.LoRAParam))
     model_def, model_state = nnx.split(model)
     opt_def, opt_state = nnx.split(opt)
 
@@ -45,16 +39,15 @@ def main():
         opt_def,
         opt_state,
         tokenizer,
-        batch_size,
-        seq_length,
+        config,
         env.instructions(),
         logger,
         rngs.agent(),
     )
 
-    env_indices = np.arange(batch_size, dtype=np.int32)
-    rewards = np.zeros((batch_size,), dtype=np.float32)
-    dones = np.zeros((batch_size,), dtype=jnp.bool_)
+    env_indices = np.arange(eval_batch_size, dtype=np.int32)
+    rewards = np.zeros((eval_batch_size,), dtype=np.float32)
+    dones = np.zeros((eval_batch_size,), dtype=jnp.bool_)
 
     obs = env.reset(env_indices)
 

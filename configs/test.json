@@ -1,0 +1,31 @@
+{
+    "seed": "random",
+    "base_model": "Qwen/Qwen3-4B-Instruct-2507",
+    "eval_envs": 64,
+    "update_envs": 4,
+    "max_seq_length": 512,
+    "lora": {
+        "mlp": true,
+        "attn": false,
+        "rank": 8
+    },
+    "logger": {
+        "use_console": true,
+        "use_wandb": false
+    },
+    "optimizer": {
+        "lr": 0.0001
+    },
+    "loss": {
+        "gea_lambda": 0.95,
+        "gea_discount": 0.99,
+        "vf_coef": 1.0
+    },
+    "env": {
+        "name": "arithmetic",
+        "settings": {
+            "max_x": 10000,
+            "max_y": 10000
+        }
+    }
+}

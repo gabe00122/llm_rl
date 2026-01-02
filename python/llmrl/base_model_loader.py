@@ -79,14 +79,14 @@ def load_safetensors(file_path: str):
     return params
 
 
-def load_model(model_path: str, lora_config: LoraConfig, rngs: nnx.Rngs):
+def load_base_model(model_name: str, rngs: nnx.Rngs):
+    model_path = f"base-models/{model_name}"
     config = load_hf_llm_config(f"{model_path}/config.json")
     params = load_safetensors(model_path)
     tokenizer = load_tokenizer(model_path)
     sampling = load_sampling_config(f"{model_path}/generation_config.json")
 
     model = Qwen3(config, rngs=rngs)
-    model.initialize_lora(lora_config, rngs=rngs)
     model.load_params(params)
 
     return model, tokenizer, sampling

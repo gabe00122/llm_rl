@@ -26,7 +26,7 @@ where
     E: EnvInstance<Shared = S>,
     S: EnvShared,
 {
-    pub fn new(seed: u64, num: usize, settings: S::Settings) -> Self {
+    pub fn new(num: usize, seed: u64, settings: S::Settings) -> Self {
         let mut rng = SmallRng::seed_from_u64(seed);
         let shared = Arc::new(S::new(settings));
 
@@ -79,9 +79,9 @@ macro_rules! create_env_wrapper {
         #[pymethods]
         impl $py_name {
             #[new]
-            fn new(seed: u64, num_agents: usize, settings: $setting_struct) -> Self {
+            fn new(num_agents: usize, seed: u64, settings: $setting_struct) -> Self {
                 Self {
-                    envs: Envs::new(seed, num_agents, settings),
+                    envs: Envs::new(num_agents, seed, settings),
                 }
             }
 
