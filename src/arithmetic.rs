@@ -1,11 +1,13 @@
 extern crate rand;
 
+use std::sync::Arc;
+
+use crate::create_env_wrapper;
+use crate::env::{EnvInstance, EnvShared, Envs};
 use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::prelude::*;
 use rand::{distr::Uniform, prelude::*};
 use regex::Regex;
-use crate::env::{EnvInstance, Envs};
-use crate::create_env_wrapper;
 
 #[derive(Clone, Copy)]
 pub enum Operator {
@@ -15,10 +17,30 @@ pub enum Operator {
     Div,
 }
 
-pub struct ArithmeticSettings {}
+#[derive(Clone, FromPyObject)]
+pub struct ArithmeticSettings {
+    max_x: i32,
+    max_y: i32,
+}
+
+pub struct ArithmeticShared {
+    number_re: Regex,
+    settings: ArithmeticSettings,
+}
+
+impl EnvShared for ArithmeticShared {
+    type Settings = ArithmeticSettings;
+
+    fn new(settings: Self::Settings) -> Self {
+        Self {
+            number_re: Regex::new(r"[\d,]+(?:\.\d*)?").unwrap(),
+            settings,
+        }
+    }
+}
 
 struct ArithmeticEnvInstance {
-    number_re: Regex,
+    shared: Arc<ArithmeticShared>,
     rng: SmallRng,
     op: Operator,
     x: f32,
@@ -64,11 +86,11 @@ fn parse_response(re: &Regex, text: &str) -> Option<f32> {
 }
 
 impl EnvInstance for ArithmeticEnvInstance {
-    type Settings = ArithmeticSettings;
+    type Shared = ArithmeticShared;
 
-    fn new(seed: u64, _settings: &Self::Settings) -> Self {
+    fn new(seed: u64, shared: Arc<Self::Shared>) -> Self {
         ArithmeticEnvInstance {
-            number_re: Regex::new(r"[\d,]+(?:\.\d*)?").unwrap(),
+            shared,
             rng: SmallRng::seed_from_u64(seed),
             op: Operator::Add,
             x: 0.0,
@@ -95,7 +117,7 @@ impl EnvInstance for ArithmeticEnvInstance {
     }
 
     fn step(&mut self, action: &str) -> (String, f32, bool) {
-        let parsed = parse_response(&self.number_re, action);
+        let parsed = parse_response(&self.shared.number_re, action);
 
         let corrected = if let Some(p) = parsed {
             (p - self.result).abs() < 0.001
@@ -109,52 +131,10 @@ impl EnvInstance for ArithmeticEnvInstance {
     }
 }
 
-// #[pyclass]
-// pub struct ArithmeticEnv {
-//     envs: Envs<ArithmeticEnvInstance>,
-// }
-
-// #[pymethods]
-// impl ArithmeticEnv {
-//     #[new]
-//     fn new(num_agents: usize) -> Self {
-//         Self { envs: Envs::new(0, num_agents, &ArithmeticSettings {}) }
-//     }
-
-//     fn reset<'py>(&mut self, batch_indices: PyReadonlyArray1<'py, i32>) -> PyResult<Vec<String>> {
-//         let indices = batch_indices.as_array();
-//         let result = self.envs.reset(indices);
-//         Ok(result)
-//     }
-
-//     fn step<'py>(
-//         &mut self,
-//         py: Python<'py>,
-//         batch_indices: PyReadonlyArray1<'py, i32>,
-//         actions: Vec<String>,
-//     ) -> PyResult<(Vec<String>, Bound<'py, PyArray1<f32>>, Bound<'py, PyArray1<bool>>)> {
-//         let indices = batch_indices.as_array();
-
-//         let (obs, rewards, dones) = self.envs.step(&indices, &actions);
-        
-//         let rewards: Bound<'py, PyArray1<f32>> = rewards.into_pyarray(py);
-//         let dones: Bound<'py, PyArray1<bool>> = dones.into_pyarray(py);
-
-//         Ok((obs, rewards, dones))
-//     }
-
-//     fn instructions(&self) -> PyResult<&'static str> {
-//         Ok(
-//             "Solve the arithmetic expression using +, -, * or /. Show your work if needed, but end with only the numeric result on its own line. Always output with decimals such as 123.456",
-//         )
-//     }
-// }
-
-
 // Create the wrapper for Arithmetic
 create_env_wrapper!(
-    ArithmeticEnv,                  // Python Class Name
-    ArithmeticEnvInstance,          // Rust Inner Type
-    ArithmeticSettings {},          // Settings Expression
-    "Solve the arithmetic expression using +, -, * or /. Show your work if needed, but end with only the numeric result on its own line. Always output with decimals such as 123.456" // Instructions
+    ArithmeticEnv,
+    ArithmeticEnvInstance,
+    ArithmeticSettings,
+    "Solve the arithmetic expression using +, -, * or /. Show your work if needed, but end with only the numeric result on its own line. Always output with decimals such as 123.456"
 );

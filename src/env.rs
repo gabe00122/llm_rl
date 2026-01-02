@@ -1,35 +1,50 @@
 use std::borrow::Borrow;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use rand::prelude::*;
 
-pub trait EnvInstance {
+pub trait EnvShared {
     type Settings;
+    fn new(settings: Self::Settings) -> Self;
+}
 
-    fn new(seed: u64, settings: &Self::Settings) -> Self;
+pub trait EnvInstance {
+    type Shared: EnvShared;
+
+    fn new(seed: u64, shared: Arc<Self::Shared>) -> Self;
     fn reset(&mut self) -> String;
     fn step(&mut self, action: &str) -> (String, f32, bool);
 }
 
 pub struct Envs<E> {
-    envs: Vec<E>
+    envs: Vec<E>,
 }
 
-impl<E: EnvInstance> Envs<E> {
-    pub fn new(seed: u64, num: usize, settings: &E::Settings) -> Self {
+impl<E, S> Envs<E>
+where
+    E: EnvInstance<Shared = S>,
+    S: EnvShared,
+{
+    pub fn new(seed: u64, num: usize, settings: S::Settings) -> Self {
         let mut rng = SmallRng::seed_from_u64(seed);
+        let shared = Arc::new(S::new(settings));
 
         let envs = (0..num)
-            .map(|_| E::new(rng.next_u64(), settings))
+            .map(|_| E::new(rng.next_u64(), shared.clone()))
             .collect();
 
         Self { envs }
     }
 
-    pub fn reset<'a>(&mut self, indices: impl IntoIterator<Item=&'a i32>) -> Vec<String> {
+    pub fn reset<I>(&mut self, indices: I) -> Vec<String>
+    where
+        I: IntoIterator,
+        I::Item: Borrow<i32>,
+    {
         indices
             .into_iter()
-            .map(|&i| self.envs.get_mut(i as usize).unwrap().reset())
+            .map(|i| self.envs.get_mut(*i.borrow() as usize).unwrap().reset())
             .collect()
     }
 
@@ -40,22 +55,22 @@ impl<E: EnvInstance> Envs<E> {
         A: IntoIterator,
         A::Item: AsRef<str>,
     {
-        indices.into_iter().zip(actions).map(|(index, action)| {
-            let index = *index.borrow();
-            let action = action.as_ref();
+        indices
+            .into_iter()
+            .zip(actions)
+            .map(|(index, action)| {
+                let index = *index.borrow();
+                let action = action.as_ref();
 
-            self.envs
-                    .get_mut(index as usize)
-                    .unwrap()
-                    .step(action)
-        }).multiunzip()
+                self.envs.get_mut(index as usize).unwrap().step(action)
+            })
+            .multiunzip()
     }
 }
 
-
 #[macro_export]
 macro_rules! create_env_wrapper {
-    ($py_name:ident, $rust_env:ty, $settings:expr, $instr:literal) => {
+    ($py_name:ident, $rust_env:ty, $setting_struct:ty, $instr:literal) => {
         #[pyclass]
         pub struct $py_name {
             envs: Envs<$rust_env>,
@@ -64,13 +79,16 @@ macro_rules! create_env_wrapper {
         #[pymethods]
         impl $py_name {
             #[new]
-            fn new(num_agents: usize) -> Self {
-                Self { 
-                    envs: Envs::new(0, num_agents, &$settings) 
+            fn new(seed: u64, num_agents: usize, settings: $setting_struct) -> Self {
+                Self {
+                    envs: Envs::new(seed, num_agents, settings),
                 }
             }
 
-            fn reset<'py>(&mut self, batch_indices: PyReadonlyArray1<'py, i32>) -> PyResult<Vec<String>> {
+            fn reset<'py>(
+                &mut self,
+                batch_indices: PyReadonlyArray1<'py, i32>,
+            ) -> PyResult<Vec<String>> {
                 let indices = batch_indices.as_array();
                 Ok(self.envs.reset(indices))
             }
@@ -80,7 +98,11 @@ macro_rules! create_env_wrapper {
                 py: Python<'py>,
                 batch_indices: PyReadonlyArray1<'py, i32>,
                 actions: Vec<String>,
-            ) -> PyResult<(Vec<String>, Bound<'py, PyArray1<f32>>, Bound<'py, PyArray1<bool>>)> {
+            ) -> PyResult<(
+                Vec<String>,
+                Bound<'py, PyArray1<f32>>,
+                Bound<'py, PyArray1<bool>>,
+            )> {
                 let indices = batch_indices.as_array();
 
                 let (obs, rewards, dones) = self.envs.step(&indices, &actions);
