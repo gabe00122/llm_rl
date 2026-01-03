@@ -87,7 +87,7 @@ def update_step(opt_def, opt_state, model_def, model_state, rollout: UpdateBatch
     advantages, targets = calculate_advantages(jnp.asarray(rollout.rewards), values, config.gea_discount, config.gea_lambda, False)
 
     # do the update
-    diff = nnx.DiffState(0, nnx.Any(ValueParam, nnx.LoRAParam))
+    diff = nnx.DiffState(0, opt.wrt)
     grad, metrics = nnx.grad(loss_fn, argnums=diff, has_aux=True)(model, rollout, advantages, targets, config)
 
     opt.update(model, grad)

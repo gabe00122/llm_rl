@@ -9,7 +9,6 @@ from pathlib import Path
 from flax import nnx
 
 from llmrl.config import LoraConfig, LLMConfig, SamplingConfig
-# from llmrl.model import Qwen3
 from llmrl.util import load_tokenizer
 
 
@@ -65,7 +64,6 @@ def load_param_dict(params: dict[str, object], file_path: Path):
         for key in track(f.keys(), description="Loading weights"):
             key_path = key.split(".")
             value = f.get_tensor(key)
-            print(f"key: {key}, type: {value.dtype}") # temp
             _put_path(params, key_path, value)
 
 

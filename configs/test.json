@@ -4,6 +4,8 @@
     "eval_envs": 64,
     "update_envs": 4,
     "max_seq_length": 512,
+    "total_update_episodes": 10000,
+    "checkpoint_every": 2000,
     "lora": {
         "mlp": true,
         "attn": false,
@@ -11,10 +13,10 @@
     },
     "logger": {
         "use_console": true,
-        "use_wandb": false
+        "use_wandb": true
     },
     "optimizer": {
-        "lr": 0.0001
+        "lr": 0.000002
     },
     "loss": {
         "gea_lambda": 0.95,
@@ -23,9 +25,7 @@
     },
     "env": {
         "name": "arithmetic",
-        "settings": {
-            "max_x": 10000,
-            "max_y": 10000
-        }
+        "max_x": 1000,
+        "max_y": 1000
     }
 }

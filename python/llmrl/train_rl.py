@@ -7,7 +7,6 @@ from llmrl.model.value_network import ValueParam
 import numpy as np
 from flax import nnx
 
-from llmrl._envs import ArithmeticEnv
 from llmrl.agent.local import LocalAgent
 from llmrl.base_model_loader import load_base_model
 from llmrl.logger import create_logger
@@ -17,7 +16,7 @@ import optax
 
 
 def main():
-    experiment = Experiment.from_config_file("configs/test.json", create_directories=False)
+    experiment = Experiment.from_config_file("configs/test.json")
     config = experiment.config
     console = Console()
     logger = create_logger(config, experiment.unique_token, console)
@@ -28,8 +27,8 @@ def main():
 
     checkpointer = Checkpointer(experiment.checkpoints_url)
 
-    eval_batch_size = config.eval_env
-    env = make_env(config.env.name, eval_batch_size, experiment.environments_seed, config.env.settings)
+    eval_batch_size = config.eval_envs
+    env = make_env(config.env.name, eval_batch_size, experiment.environments_seed, config.env)
 
     opt = nnx.Optimizer(model=model, tx=optax.adamw(config.optimizer.lr), wrt=nnx.Any(ValueParam, nnx.LoRAParam))
     model_def, model_state = nnx.split(model)
@@ -60,7 +59,7 @@ def main():
     env_time = 0.0
 
     start = time.time()
-    while total_count < 50000:
+    while agent.update_episodes < config.total_update_episodes:
         env_indices, actions = agent.act(env_indices, obs, rewards, dones)
 
         env_start = time.perf_counter()
@@ -83,6 +82,8 @@ def main():
     print(f"Env Time: {env_time / total_time:.2%}")
     print(f"Accounted Time: {1 - (total_time - agent._reset_time - agent._gen_time - agent._decode_time - agent._append_time - env_time) / total_time:.2%}")
     print(f"Turns per second: {total_count / total_time}")
+
+    checkpointer.close()
 
 
 if __name__ == "__main__":

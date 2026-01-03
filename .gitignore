@@ -22,3 +22,7 @@ target
 # logs
 logs/
 wandb/
+results/
+
+.pytest_cache/
+.ruff_cache/

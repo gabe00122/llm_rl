@@ -1,3 +1,4 @@
+import flax
 from llmrl.checkpointer import Checkpointer
 from llmrl.config import Config
 import time
@@ -52,7 +53,7 @@ class LocalAgent(Agent):
         self._instructions = instructions
         self._logger = logger
 
-        self._update_step = 0
+        self.update_step = 0
 
         self._rng_key = rng_key
 
@@ -98,6 +99,10 @@ class LocalAgent(Agent):
         #     self._instruction_tokens,
         # )
         pass
+    
+    @property
+    def update_episodes(self):
+        return self.update_step * self._config.update_envs
 
     @override
     def act(
@@ -120,17 +125,22 @@ class LocalAgent(Agent):
             )
             while self._buffer.has_batch:
                 ub = self._buffer.take_batch()
-                self._opt_state, self._model_state, metrics = update_step(self._opt_def, self._opt_state, self._model_def, self._model_state, ub)
+                self._opt_state, self._model_state, metrics = update_step(self._opt_def, self._opt_state, self._model_def, self._model_state, ub, self._config.loss)
 
                 metrics["rewards"] = ub.rewards.sum() / ub.rewards.shape[0]
 
-                self._logger.log_dict(metrics, self._update_step)
-                self._update_step += 1
+                self._logger.log_dict(metrics, self.update_episodes)
+                self.update_step += 1
                 # first_ctx = self._tokenizer.decode(ub.context[0, :ub.kv_cache_lengths[0]])
                 # print(first_ctx)
 
+                if self.update_step % (self._config.checkpoint_every // self._config.update_envs) == 0:
+                    opt: nnx.Optimizer = nnx.merge(self._opt_def, self._opt_state)
+                    model = nnx.merge(self._model_def, self._model_state)
+                    self._checkpointer.save({"opt": opt, "model": model}, self.update_episodes, opt.wrt)
+
             reset_start = time.perf_counter()
-            done_mask = np.zeros((self._agent_count,), np.bool_)
+            done_mask = np.zeros((self._config.eval_envs,), np.bool_)
             done_mask[batch_indices] = dones
             self._gen: GenerationState = reset_episodes(self._gen, done_mask)
             self._reset_time += time.perf_counter() - reset_start

@@ -2,7 +2,7 @@ from llmrl.env.base import Env
 from llmrl._envs import ArithmeticEnv, WordleEnv
 
 
-def make_env(env_name: str, num_agents: int, seed: int, settings: dict) -> Env:
+def make_env(env_name: str, num_agents: int, seed: int, settings) -> Env:
     if env_name == "arithmetic":
         return ArithmeticEnv(num_agents, seed, settings)
     elif env_name == "wordle":

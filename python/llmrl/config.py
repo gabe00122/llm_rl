@@ -1,7 +1,16 @@
 import json
 import random
 from typing import Literal
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+# Environment Config
+
+class ArithmeticEnvConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    name: Literal["arithmetic"] = "arithmetic"
+    max_x: int
+    max_y: int
+
 
 # Base Model Config
 class LLMConfig(BaseModel):
@@ -53,12 +62,6 @@ class LoggerConfig(BaseModel):
     use_wandb: bool = False
 
 
-class EnvConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    name: Literal["arithmetic", "wordle"]
-    settings: dict
-
-
 class OptimizerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     lr: float
@@ -79,11 +82,12 @@ class Config(BaseModel):
     logger: LoggerConfig
     optimizer: OptimizerConfig
     loss: LossConfig
-    env: EnvConfig
+    env: ArithmeticEnvConfig = Field(discriminator="name")
 
     eval_envs: int
     update_envs: int
     max_seq_length: int
+    total_update_episodes: int
     checkpoint_every: int
 
 
