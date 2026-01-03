@@ -1,3 +1,4 @@
+from llmrl.checkpointer import Checkpointer
 from llmrl.experiement import Experiment
 import time
 
@@ -25,8 +26,9 @@ def main():
     rngs = nnx.Rngs(0)
     model, tokenizer, sampling = load_base_model(model_name, rngs)
 
-    eval_batch_size = config.eval_env
+    checkpointer = Checkpointer(experiment.checkpoints_url)
 
+    eval_batch_size = config.eval_env
     env = make_env(config.env.name, eval_batch_size, experiment.environments_seed, config.env.settings)
 
     opt = nnx.Optimizer(model=model, tx=optax.adamw(config.optimizer.lr), wrt=nnx.Any(ValueParam, nnx.LoRAParam))
@@ -39,6 +41,7 @@ def main():
         opt_def,
         opt_state,
         tokenizer,
+        checkpointer,
         config,
         env.instructions(),
         logger,

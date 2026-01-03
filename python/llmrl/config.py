@@ -79,11 +79,12 @@ class Config(BaseModel):
     logger: LoggerConfig
     optimizer: OptimizerConfig
     loss: LossConfig
+    env: EnvConfig
 
     eval_envs: int
     update_envs: int
     max_seq_length: int
-    env: EnvConfig
+    checkpoint_every: int
 
 
 def load_config(json_config: str) -> Config:

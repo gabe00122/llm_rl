@@ -1,3 +1,4 @@
+from llmrl.checkpointer import Checkpointer
 from llmrl.config import Config
 import time
 from typing import override
@@ -35,7 +36,8 @@ class LocalAgent(Agent):
         opt_def,
         opt_state,
         tokenizer: PreTrainedTokenizerFast,
-        config: Config
+        checkpointer: Checkpointer,
+        config: Config,
         instructions: str,
         logger: BaseLogger,
         rng_key: jax.Array,
@@ -45,6 +47,7 @@ class LocalAgent(Agent):
         self._opt_def = opt_def
         self._opt_state = opt_state
         self._tokenizer = tokenizer
+        self._checkpointer = checkpointer
         self._config = config
         self._instructions = instructions
         self._logger = logger
@@ -100,8 +103,6 @@ class LocalAgent(Agent):
     def act(
         self, batch_indices: np.ndarray, obs: list[str], rewards: np.ndarray, dones: np.ndarray
     ) -> tuple[np.ndarray, list[str]]:
-        
-        # debug
         kv_cache_lengths = np.array(self._gen.kv_cache_length)
         self._rewards[batch_indices, kv_cache_lengths[batch_indices]] = rewards
 
