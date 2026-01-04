@@ -77,6 +77,8 @@ class LossConfig(BaseModel):
     gae_lambda: float
     gae_discount: float
     vf_coef: float
+    vf_clip: float
+    pg_clip: float
 
 
 class Config(BaseModel):

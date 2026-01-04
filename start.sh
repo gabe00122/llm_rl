@@ -4,10 +4,6 @@ set -e
 # Activate the virtual environment
 source .venv/bin/activate
 
-echo "Container started successfully."
-echo "Python version: $(python --version)"
-echo "JAX devices: $(python -c 'import jax; print(jax.devices())' 2>/dev/null || echo 'JAX not functional')"
-
 REPO_ID="Qwen/Qwen3-4B-Instruct-2507"
 MODEL_DIR="/app/base-models/Qwen/Qwen3-4B-Instruct-2507"
 
@@ -25,10 +21,4 @@ else
     echo "Model found at $MODEL_DIR. Skipping download."
 fi
 
-# Keep the container running if no command is passed, or execute the passed command
-if [ $# -eq 0 ]; then
-    echo "No command provided. Starting infinite loop to keep pod alive..."
-    tail -f /dev/null
-else
-    exec "$@"
-fi
+uv run ./python/llmrl/train_rl.py

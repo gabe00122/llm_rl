@@ -92,7 +92,7 @@ class ConsoleLogger(BaseLogger):
 
 class WandbLogger(BaseLogger):
     def __init__(self, unique_token: str, settings: Config):
-        wandb.init(project=settings.logger.project_name, name=unique_token)
+        wandb.init(project=settings.logger.project_name, name=unique_token, config=settings.model_dump())
 
     def log_dict(self, data: Metrics, step: int) -> None:
         normalized_data = json_normalize(data)

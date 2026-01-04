@@ -10,7 +10,7 @@ from llmrl.buffer import UpdateBatch
 
 
 def calculate_advantages(
-    rewards: jax.Array, values: jax.Array, discount: float, gae_lambda: float, norm_adv: bool
+    rewards: jax.Array, values: jax.Array, discount: float, gae_lambda: float
 ) -> tuple[jax.Array, jax.Array]:
     def _body(acc, xs):
         rewards, v_tp1 = xs
@@ -30,12 +30,6 @@ def calculate_advantages(
 
     advantages = targets - values
 
-    # rollout norm
-    if norm_adv:
-        advantages = (advantages - advantages.mean()) / (
-            advantages.std() + 1e-8
-        )
-
     return advantages, targets
 
 def loss_fn(model: Qwen3, rollout: UpdateBatch, advantages: jax.Array, targets: jax.Array, config: LossConfig) -> tuple[jax.Array, dict[str, jax.Array]]:
@@ -54,15 +48,29 @@ def loss_fn(model: Qwen3, rollout: UpdateBatch, advantages: jax.Array, targets: 
 
     log_prob = policy.log_prob(rollout.context[:, 1:])
 
-    value_loss = 0.5 * jnp.square(values - targets).mean(where=policy_mask)
-    actor_loss = -(log_prob * advantages).mean(where=policy_mask)
+    # value_loss = 0.5 * jnp.square(values - targets).mean(where=policy_mask)
+    # actor_loss = -(log_prob * advantages).mean(where=policy_mask)
+    value_pred_clipped = rollout.values[:, :-1] + jnp.clip(
+        values - rollout.values[:, :-1], -config.vf_clip, config.vf_clip
+    )
+
+    value_losses = jnp.square(values - targets)
+    value_losses_clipped = jnp.square(value_pred_clipped - targets)
+    value_loss = 0.5 * jnp.maximum(value_losses, value_losses_clipped).mean(where=policy_mask)
+
+    pg_ratio = jnp.exp(log_prob - rollout.log_probs[:, :-1])
+    pg_loss1 = pg_ratio * advantages
+    pg_loss2 = (
+        jnp.clip(pg_ratio, 1.0 - config.pg_clip, 1.0 + config.pg_clip) * advantages
+    )
+    actor_loss = -jnp.minimum(pg_loss1, pg_loss2).mean(where=policy_mask)
     
     # entropy_loss = -0.0001 * policy.entropy().mean(where=policy_mask)
     loss = config.vf_coef * value_loss + actor_loss # + entropy_loss
 
     metrics = {
         'value_loss': value_loss,
-        'actor_loss': actor_loss
+        'actor_loss': actor_loss,
     }
 
     return loss, metrics
@@ -85,12 +93,15 @@ def update_step(opt_def, opt_state, model_def, model_state, rollout: UpdateBatch
         values=values
     )
 
-    advantages, targets = calculate_advantages(jnp.asarray(rollout.rewards), values, config.gae_discount, config.gae_lambda, False)
+    advantages, targets = calculate_advantages(jnp.asarray(rollout.rewards), values, config.gae_discount, config.gae_lambda)
 
     # do the update
     diff = nnx.DiffState(0, opt.wrt)
     grad, metrics = nnx.grad(loss_fn, argnums=diff, has_aux=True)(model, rollout, advantages, targets, config)
 
     opt.update(model, grad)
+
+    metrics['value'] = values.mean()
+    metrics['episode_length'] = rollout.kv_cache_lengths.mean()
 
     return nnx.state(opt), nnx.state(model), metrics

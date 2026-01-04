@@ -19,9 +19,11 @@
         "lr": 0.00002
     },
     "loss": {
-        "gae_lambda": 0.9,
+        "gae_lambda": 0.95,
         "gae_discount": 1.0,
-        "vf_coef": 1.0
+        "vf_coef": 1.0,
+        "vf_clip": 0.28,
+        "pg_clip": 0.28
     },
     "env": {
         "name": "arithmetic",
