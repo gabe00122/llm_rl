@@ -4,7 +4,6 @@ from llmrl.config import Config
 import time
 from typing import override
 
-from idna import decode
 import jax
 from jax import numpy as jnp
 from flax import nnx

@@ -29,7 +29,7 @@ class UpdateBuffer:
 
     @property
     def has_batch(self):
-        return self._index >= self._batch_size - 1
+        return self._index >= self._batch_size
     
     def store(self, done_indices: np.ndarray, context: np.ndarray, kv_cache_lengths: np.ndarray, rewards: np.ndarray, values: np.ndarray, log_probs: np.ndarray, policy_mask: np.ndarray):
         if self.has_batch:

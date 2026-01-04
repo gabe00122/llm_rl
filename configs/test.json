@@ -16,12 +16,12 @@
         "use_wandb": true
     },
     "optimizer": {
-        "lr": 0.000001
+        "lr": 0.00002
     },
     "loss": {
-        "gea_lambda": 0.9,
-        "gea_discount": 1.0,
-        "vf_coef": 1000.0
+        "gae_lambda": 0.9,
+        "gae_discount": 1.0,
+        "vf_coef": 1.0
     },
     "env": {
         "name": "arithmetic",

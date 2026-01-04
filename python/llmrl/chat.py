@@ -176,14 +176,12 @@ def generate(
     model = nnx.merge(model_def, model_state)
 
     B, seq_length = gen.context.shape
-    # batch_range = jnp.arange(B, dtype=jnp.int32)
 
     def cond(carry: GenerationState):
         # todo: this could infinite loop
         return jnp.sum(carry.turn_finished) < wait_for
 
     def body(carry: GenerationState):
-        # in_tokens = carry.context[batch_index, carry.kv_cache_length]
         in_tokens = batched_take(carry.context, carry.kv_cache_length)
 
         logits, value, kv_cache = model(
@@ -194,22 +192,16 @@ def generate(
 
         sample_key, rng_key = jax.random.split(carry.rng_key)
 
-        next_log_probs = gen.log_probs
+        next_log_probs = carry.log_probs
 
-        # next_values = gen.values.at[batch_index, carry.kv_cache_length].set(
-        #     value.squeeze(-1)
-        # )
-        next_values = batched_put(gen.values, carry.kv_cache_length, value.squeeze(-1))
+        next_values = batched_put(carry.values, carry.kv_cache_length, value.squeeze(-1))
         if sampling == "greedy":
             sample_tokens = jnp.argmax(logits.squeeze(-2), -1)
         elif sampling == "simple":
             dist = Categorical(logits=logits.squeeze(-2))
             sample_tokens: jax.Array = dist.sample(seed=sample_key)
             log_prob: jax.Array = dist.log_prob(sample_tokens)
-            # prob = dist.prob(sample_tokens)
-            # next_log_probs = next_log_probs.at[batch_range, carry.kv_cache_length].set(log_prob)
             next_log_probs = batched_put(next_log_probs, carry.kv_cache_length, log_prob)
-
         else:
             sample_tokens = sample(sampling, logits.squeeze(axis=-2), sample_key)
 
@@ -235,8 +227,6 @@ def generate(
         )
 
         policy_mask = batched_put(carry.policy_mask, carry.kv_cache_length, use_sample)
-
-        # jax.debug.print("{} - {}", use_sample[0], out_tokens[0])
 
         return carry._replace(
             kv_cache=kv_cache,
@@ -269,7 +259,7 @@ def chat(
 
     gen = create_generation_state(kv_cache, batch_size, seq_length, rng_key)
 
-    batch_indecies = np.arange(batch_size, dtype=np.int32)
+    batch_indices = np.arange(batch_size, dtype=np.int32)
 
     while True:
         prompt = console.input("Prompt: ")
@@ -283,7 +273,7 @@ def chat(
 
         start_time = time.time()
         start_tokens = gen.kv_cache_length[0].item()
-        gen = append_prompt_tokens(gen, batch_indecies, prompt_tokens)
+        gen = append_prompt_tokens(gen, batch_indices, prompt_tokens)
         gen: GenerationState = generate(model_def, model_state, "simple", gen)
         end_tokens = gen.kv_cache_length[0].item()
         end_time = time.time()

@@ -74,8 +74,8 @@ class OptimizerConfig(BaseModel):
 
 class LossConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    gea_lambda: float
-    gea_discount: float
+    gae_lambda: float
+    gae_discount: float
     vf_coef: float
 
 

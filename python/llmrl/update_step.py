@@ -9,10 +9,6 @@ from llmrl.model.value_network import ValueParam
 from llmrl.buffer import UpdateBatch
 
 
-class UpdateSettings(NamedTuple):
-    mini_batch_count: int
-
-
 def calculate_advantages(
     rewards: jax.Array, values: jax.Array, discount: float, gae_lambda: float, norm_adv: bool
 ) -> tuple[jax.Array, jax.Array]:
@@ -44,20 +40,25 @@ def calculate_advantages(
 
 def loss_fn(model: Qwen3, rollout: UpdateBatch, advantages: jax.Array, targets: jax.Array, config: LossConfig) -> tuple[jax.Array, dict[str, jax.Array]]:
     batch_len, seq_len = rollout.context.shape
+
+    policy_mask = rollout.policy_mask[:, :-1]
+    advantages = advantages[:, :-1]
+    targets = targets[:, :-1]
     
     positions = jnp.arange(seq_len, dtype=jnp.int32)[None, :]
     positions = jnp.repeat(positions, batch_len, 0)
 
     logits, values, _ = model(jnp.asarray(rollout.context), positions)
-    policy = distrax.Categorical(logits=logits[:, :-1, :])
+    values = values[:, :-1]
+    policy = distrax.Categorical(logits=logits[:, :-1])
 
     log_prob = policy.log_prob(rollout.context[:, 1:])
 
-    value_loss = 0.5 * jnp.square(values - targets).mean(where=rollout.policy_mask)
-    actor_loss = -(log_prob * advantages[:, :-1]).mean(where=rollout.policy_mask[:, :-1])
+    value_loss = 0.5 * jnp.square(values - targets).mean(where=policy_mask)
+    actor_loss = -(log_prob * advantages).mean(where=policy_mask)
     
-    entropy_loss = -0.0001 * policy.entropy().mean(where=rollout.policy_mask[:, :-1])
-    loss = config.vf_coef * value_loss + actor_loss + entropy_loss
+    # entropy_loss = -0.0001 * policy.entropy().mean(where=policy_mask)
+    loss = config.vf_coef * value_loss + actor_loss # + entropy_loss
 
     metrics = {
         'value_loss': value_loss,
@@ -84,7 +85,7 @@ def update_step(opt_def, opt_state, model_def, model_state, rollout: UpdateBatch
         values=values
     )
 
-    advantages, targets = calculate_advantages(jnp.asarray(rollout.rewards), values, config.gea_discount, config.gea_lambda, False)
+    advantages, targets = calculate_advantages(jnp.asarray(rollout.rewards), values, config.gae_discount, config.gae_lambda, False)
 
     # do the update
     diff = nnx.DiffState(0, opt.wrt)
