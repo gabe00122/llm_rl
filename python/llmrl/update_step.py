@@ -53,11 +53,11 @@ def loss_fn(model: Qwen3, rollout: UpdateBatch, advantages: jax.Array, targets: 
 
     log_prob = policy.log_prob(rollout.context[:, 1:])
 
-    value_loss = 0.5 * config.vf_coef * jnp.square(values - targets).mean(where=rollout.policy_mask)
+    value_loss = 0.5 * jnp.square(values - targets).mean(where=rollout.policy_mask)
     actor_loss = -(log_prob * advantages[:, :-1]).mean(where=rollout.policy_mask[:, :-1])
-    loss = value_loss + actor_loss
-
-    # entropy_loss = -0.002 * policy.entropy().mean(where=rollout.policy_mask[:, :-1])
+    
+    entropy_loss = -0.0001 * policy.entropy().mean(where=rollout.policy_mask[:, :-1])
+    loss = config.vf_coef * value_loss + actor_loss + entropy_loss
 
     metrics = {
         'value_loss': value_loss,

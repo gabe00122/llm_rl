@@ -11,6 +11,11 @@ class ArithmeticEnvConfig(BaseModel):
     max_x: int
     max_y: int
 
+class WordleEnvConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    name: Literal["wordle"] = "wordle"
+    max_guesses: int
+    words: list[str]
 
 # Base Model Config
 class LLMConfig(BaseModel):
@@ -82,7 +87,7 @@ class Config(BaseModel):
     logger: LoggerConfig
     optimizer: OptimizerConfig
     loss: LossConfig
-    env: ArithmeticEnvConfig = Field(discriminator="name")
+    env: ArithmeticEnvConfig | WordleEnvConfig = Field(discriminator="name")
 
     eval_envs: int
     update_envs: int

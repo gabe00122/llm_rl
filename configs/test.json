@@ -8,20 +8,20 @@
     "checkpoint_every": 2000,
     "lora": {
         "mlp": true,
-        "attn": false,
-        "rank": 8
+        "attn": true,
+        "rank": 32
     },
     "logger": {
         "use_console": true,
         "use_wandb": true
     },
     "optimizer": {
-        "lr": 0.000002
+        "lr": 0.000001
     },
     "loss": {
-        "gea_lambda": 0.95,
-        "gea_discount": 0.99,
-        "vf_coef": 1.0
+        "gea_lambda": 0.9,
+        "gea_discount": 1.0,
+        "vf_coef": 1000.0
     },
     "env": {
         "name": "arithmetic",

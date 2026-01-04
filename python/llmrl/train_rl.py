@@ -22,8 +22,9 @@ def main():
     logger = create_logger(config, experiment.unique_token, console)
 
     model_name = "Qwen/Qwen3-4B-Instruct-2507"
-    rngs = nnx.Rngs(0)
+    rngs = nnx.Rngs(experiment.params_seed)
     model, tokenizer, sampling = load_base_model(model_name, rngs)
+    model.initialize_lora(config.lora, rngs=rngs)
 
     checkpointer = Checkpointer(experiment.checkpoints_url)
 

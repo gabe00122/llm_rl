@@ -3,6 +3,7 @@ use crate::env::{EnvInstance, EnvShared, Envs};
 use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::prelude::*;
 use rand::prelude::*;
+use regex::Regex;
 use std::sync::Arc;
 
 #[derive(Clone, FromPyObject)]
@@ -13,13 +14,17 @@ pub struct WordleSettings {
 
 pub struct WordleShared {
     settings: WordleSettings,
+    guess_re: Regex,
 }
 
 impl EnvShared for WordleShared {
     type Settings = WordleSettings;
 
     fn new(settings: Self::Settings) -> Self {
-        Self { settings }
+        Self {
+            settings,
+            guess_re: Regex::new(r"[a-zA-Z]{5}").unwrap(),
+        }
     }
 }
 
@@ -28,6 +33,24 @@ struct WordleInstance {
     rng: SmallRng,
     secret_word_index: usize,
     guesses: usize,
+}
+
+impl WordleInstance {
+    fn generate_feedback(&self, guess: &str) -> String {
+        let secret_word: &str = &self.shared.settings.words[self.secret_word_index];
+
+        let mut feedback = ['-'; 5];
+
+        for (i, (g, s)) in guess.chars().zip(secret_word.chars()).enumerate() {
+            if g == s {
+                feedback[i] = 'G';
+            } else if secret_word.contains(g) {
+                feedback[i] = 'Y';
+            }
+        }
+
+        feedback.iter().collect()
+    }
 }
 
 impl EnvInstance for WordleInstance {
@@ -45,15 +68,37 @@ impl EnvInstance for WordleInstance {
     }
 
     fn reset(&mut self) -> String {
-        String::new()
+        self.guesses = 0;
+        self.secret_word_index = self.rng.random_range(0..self.shared.settings.words.len());
+
+        "Make your first guess now".to_string()
     }
 
     fn step(&mut self, action: &str) -> (String, f32, bool) {
-        let obs = String::new();
-        let reward = 0.0;
-        let done = false;
+        let secret_word: &str = &self.shared.settings.words[self.secret_word_index];
+        let guess = self
+            .shared
+            .guess_re
+            .find_iter(action)
+            .last()
+            .map(|m| m.as_str().to_lowercase());
 
-        (obs, reward, done)
+        let (obs, reward, word_found) = if let Some(guess) = guess {
+            if guess == secret_word {
+                ("You guessed the word!".to_string(), 1.0, true)
+            } else {
+                (self.generate_feedback(&guess), 0.0, false)
+            }
+        } else {
+            ("No guess was found".to_string(), 0.0, false)
+        };
+
+        self.guesses += 1;
+        if word_found || self.guesses >= self.shared.settings.max_guesses {
+            (self.reset(), reward, true)
+        } else {
+            (obs, reward, false)
+        }
     }
 }
 
