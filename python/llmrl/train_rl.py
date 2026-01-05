@@ -31,7 +31,7 @@ def main():
     eval_batch_size = config.eval_envs
     env = make_env(config.env.name, eval_batch_size, experiment.environments_seed, config.env)
 
-    opt = nnx.Optimizer(model=model, tx=optax.MultiSteps(optax.adamw(config.optimizer.lr), every_k_schedule=4), wrt=nnx.Any(ValueParam, nnx.LoRAParam))
+    opt = nnx.Optimizer(model=model, tx=optax.MultiSteps(optax.adamw(config.optimizer.lr), every_k_schedule=8), wrt=nnx.Any(ValueParam, nnx.LoRAParam))
     model_def, model_state = nnx.split(model)
     opt_def, opt_state = nnx.split(opt)
 

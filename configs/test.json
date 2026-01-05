@@ -4,7 +4,7 @@
     "eval_envs": 64,
     "update_envs": 4,
     "max_seq_length": 512,
-    "total_update_episodes": 100000,
+    "total_update_episodes": 1000000,
     "checkpoint_every": 20000,
     "lora": {
         "mlp": true,
@@ -19,9 +19,9 @@
         "lr": 0.00002
     },
     "loss": {
-        "gae_lambda": 0.95,
+        "gae_lambda": 0.91,
         "gae_discount": 1.0,
-        "vf_coef": 1.0,
+        "vf_coef": 0.5,
         "vf_clip": 0.28,
         "pg_clip": 0.28
     },

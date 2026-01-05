@@ -30,6 +30,10 @@ def calculate_advantages(
 
     advantages = targets - values
 
+    # advantages = (advantages - advantages.mean()) / (
+    #     advantages.std() + 1e-8
+    # )
+
     return advantages, targets
 
 def loss_fn(model: Qwen3, rollout: UpdateBatch, advantages: jax.Array, targets: jax.Array, config: LossConfig, progress) -> tuple[jax.Array, dict[str, jax.Array]]:
