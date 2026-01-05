@@ -77,16 +77,22 @@ class Qwen3(nnx.Module):
     ) -> tuple[jax.Array, jax.Array, tuple[KVCache, ...] | None]:
         x = self.embeddings(tokens)
 
+        half_layers = len(self.layers) // 2
+
         if carry is not None:
             out_carry = []
-            for layer, layer_carry_in in zip(self.layers, carry):
-                last_x = x
+            for i, (layer, layer_carry_in) in enumerate(zip(self.layers, carry)):
+                if i == half_layers:
+                    value_in = layer.attn_pre_norm(x)
+
                 x, layer_carry_out = layer(x, positions, layer_carry_in)
                 out_carry.append(layer_carry_out)
             carry = tuple(out_carry)
         else:
-            for layer in self.layers:
-                last_x = x
+            for i, layer in enumerate(self.layers):
+                if i == half_layers:
+                    value_in = layer.attn_pre_norm(x)
+
                 x, _ = layer(x, positions)
 
         x = self.final_norm(x)
@@ -94,7 +100,7 @@ class Qwen3(nnx.Module):
 
         logits = logits.astype(jnp.float32)
 
-        value = self.value_net(last_x)
+        value = self.value_net(value_in)
 
         return logits, value, carry
 

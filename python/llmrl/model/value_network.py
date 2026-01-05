@@ -21,11 +21,11 @@ class ValueNetwork(nnx.Module):
         self.down_bias = ValueParam(jnp.zeros(1, dtype=jnp.bfloat16))
 
     def __call__(self, x: jax.Array) -> jax.Array:
+        x = jax.lax.stop_gradient(x)
         x = x @ self.up[:]
         x = x + self.up_bias[:]
         x = jax.nn.silu(x)
         x = x @ self.down[:]
         x = x + self.down_bias[:]
-        x = x * 0.01
         
         return x.squeeze(-1).astype(jnp.float32)

@@ -32,7 +32,7 @@ def calculate_advantages(
 
     return advantages, targets
 
-def loss_fn(model: Qwen3, rollout: UpdateBatch, advantages: jax.Array, targets: jax.Array, config: LossConfig) -> tuple[jax.Array, dict[str, jax.Array]]:
+def loss_fn(model: Qwen3, rollout: UpdateBatch, advantages: jax.Array, targets: jax.Array, config: LossConfig, progress) -> tuple[jax.Array, dict[str, jax.Array]]:
     batch_len, seq_len = rollout.context.shape
 
     policy_mask = rollout.policy_mask[:, :-1]
@@ -77,7 +77,7 @@ def loss_fn(model: Qwen3, rollout: UpdateBatch, advantages: jax.Array, targets: 
 
 
 @jax.jit(static_argnames=('opt_def', 'model_def', 'config'), donate_argnames=('opt_state', 'model_state'))
-def update_step(opt_def, opt_state, model_def, model_state, rollout: UpdateBatch, config: LossConfig):
+def update_step(opt_def, opt_state, model_def, model_state, rollout: UpdateBatch, config: LossConfig, progress):
     opt = nnx.merge(opt_def, opt_state)
     model = nnx.merge(model_def, model_state)
 
@@ -97,11 +97,11 @@ def update_step(opt_def, opt_state, model_def, model_state, rollout: UpdateBatch
 
     # do the update
     diff = nnx.DiffState(0, opt.wrt)
-    grad, metrics = nnx.grad(loss_fn, argnums=diff, has_aux=True)(model, rollout, advantages, targets, config)
+    grad, metrics = nnx.grad(loss_fn, argnums=diff, has_aux=True)(model, rollout, advantages, targets, config, progress)
 
     opt.update(model, grad)
 
-    metrics['value'] = values.mean()
+    metrics['value'] = values.mean(where=policy_mask)
     metrics['episode_length'] = rollout.kv_cache_lengths.mean()
 
     return nnx.state(opt), nnx.state(model), metrics

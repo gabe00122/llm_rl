@@ -4,8 +4,8 @@
     "eval_envs": 64,
     "update_envs": 4,
     "max_seq_length": 512,
-    "total_update_episodes": 10000,
-    "checkpoint_every": 2000,
+    "total_update_episodes": 100000,
+    "checkpoint_every": 20000,
     "lora": {
         "mlp": true,
         "attn": true,

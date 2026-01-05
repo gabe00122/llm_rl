@@ -123,8 +123,9 @@ class LocalAgent(Agent):
                 np.array(self._gen.policy_mask)
             )
             while self._buffer.has_batch:
+                progress = self.update_episodes / self._config.total_update_episodes
                 ub = self._buffer.take_batch()
-                self._opt_state, self._model_state, metrics = update_step(self._opt_def, self._opt_state, self._model_def, self._model_state, ub, self._config.loss)
+                self._opt_state, self._model_state, metrics = update_step(self._opt_def, self._opt_state, self._model_def, self._model_state, ub, self._config.loss, jnp.array(progress))
 
                 metrics["rewards"] = ub.rewards.sum() / ub.rewards.shape[0]
 

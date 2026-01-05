@@ -3,7 +3,7 @@ FROM python:3.13-slim-bookworm
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # rust deps
-RUN apt update && apt install -y build-essential curl
+RUN apt update && apt install -y build-essential curl git
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
@@ -29,5 +29,6 @@ COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
 ENV PATH="/app/.venv/bin:$PATH"
+ENV XLA_PYTHON_CLIENT_MEM_FRACTION=0.9
 
 CMD ["/start.sh"]
