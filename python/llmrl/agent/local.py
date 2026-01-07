@@ -15,7 +15,6 @@ from llmrl.chat import (
     decode_responses,
     generate,
     reset_episodes,
-    reset_generation_state,
     append_prompt_tokens,
     append_user_prompts,
     GenerationState
@@ -108,7 +107,7 @@ class LocalAgent(Agent):
         self, batch_indices: np.ndarray, obs: list[str], rewards: np.ndarray, dones: np.ndarray
     ) -> tuple[np.ndarray, list[str]]:
         kv_cache_lengths = np.array(self._gen.kv_cache_length)
-        self._rewards[batch_indices, kv_cache_lengths[batch_indices]] = rewards
+        self._rewards[batch_indices, kv_cache_lengths[batch_indices] - 2] = rewards
 
         done_idx = batch_indices[np.where(dones)]
 

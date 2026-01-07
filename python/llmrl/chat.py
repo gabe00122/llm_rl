@@ -1,3 +1,7 @@
+from llmrl.model.value_network import ValueParam
+import optax
+from llmrl.checkpointer import Checkpointer
+from llmrl.experiement import Experiment
 import time
 from typing import Any, Literal, NamedTuple
 import jax
@@ -117,10 +121,7 @@ def create_generation_state(
 def reset_generation_state(state: GenerationState) -> GenerationState:
     return state._replace(
         kv_cache_length=jnp.zeros_like(state.kv_cache_length),
-        context_length=jnp.zeros_like(state.context_length),
-        turn_start_positions=jnp.zeros_like(state.turn_start_positions),
-        policy_mask=jnp.zeros_like(state.policy_mask),
-        turn_finished=jnp.zeros_like(state.turn_finished),
+        context_length=state.env_instruction_length.copy(),
     )
 
 
@@ -251,6 +252,8 @@ def chat(
     batch_size: int,
     seq_length: int,
     rngs: nnx.Rngs,
+    *,
+    system_prompt: str | None = None,
 ):
     model_def, model_state = nnx.split(model)
 
@@ -260,6 +263,11 @@ def chat(
     gen = create_generation_state(kv_cache, batch_size, seq_length, rng_key)
 
     batch_indices = np.arange(batch_size, dtype=np.int32)
+
+    if system_prompt is not None:
+        text = [[{"role": "system", "content": system_prompt}] for _ in range(batch_size)]
+        prompt_tokens = encode_input(tokenizer, text, add_generation_prompt=False)
+        gen = append_prompt_tokens(gen, batch_indices, prompt_tokens)
 
     while True:
         prompt = console.input("Prompt: ")
@@ -285,15 +293,20 @@ def chat(
 
 
 def main():
-    # model_path = "./base-models/qwen3-0.6b"
-    model_path = "./base-models/Qwen3-4B-Instruct-2507"
-    # model_path = "./base-models/Qwen3-4B-Thinking-2507"
-    rngs = nnx.Rngs(0)
-    model, tokenizer, sampling = load_base_model(model_path, rngs)
+    experiment = Experiment.load("winged-tortoise-of-glory")
+    config = experiment.config
+    
+    rngs = nnx.Rngs(experiment.params_seed)
+    model, tokenizer, sampling = load_base_model(config.base_model, rngs)
+    model.initialize_lora(config.lora, rngs=rngs)
+    opt = nnx.Optimizer(model=model, tx=optax.sgd(optax.warmup_constant_schedule(0, config.optimizer.lr, (100000//4)//10)), wrt=nnx.Any(ValueParam, nnx.LoRAParam))
+
+    checkpointer = Checkpointer(experiment.checkpoints_url)
+    checkpointer.restore_latest({"opt": opt, "model": model}, opt.wrt)
 
     batch_size = 1
     seq_length = 16384  # 512
-    chat(Console(), model, tokenizer, sampling, batch_size, seq_length, rngs)
+    chat(Console(), model, tokenizer, sampling, batch_size, seq_length, rngs, system_prompt="Solve the arithmetic expression using +, -, * or /. Show your work if needed, but end with only the numeric result on its own line. Always output with decimals such as 123.456")
 
 
 if __name__ == "__main__":

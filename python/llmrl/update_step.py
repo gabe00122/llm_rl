@@ -36,31 +36,31 @@ def calculate_advantages(
 
     return advantages, targets
 
-def loss_fn(model: Qwen3, rollout: UpdateBatch, advantages: jax.Array, targets: jax.Array, config: LossConfig, progress) -> tuple[jax.Array, dict[str, jax.Array]]:
+def loss_fn(model: Qwen3, rollout: UpdateBatch, advantages: jax.Array, targets: jax.Array, config: LossConfig, bounds_mask: jax.Array) -> tuple[jax.Array, dict[str, jax.Array]]:
     batch_len, seq_len = rollout.context.shape
+
+    # jax.debug.print("last target: {target}", target=targets[:, -1])
 
     policy_mask = rollout.policy_mask[:, :-1]
     advantages = advantages[:, :-1]
-    targets = targets[:, :-1]
     
     positions = jnp.arange(seq_len, dtype=jnp.int32)[None, :]
     positions = jnp.repeat(positions, batch_len, 0)
 
     logits, values, _ = model(jnp.asarray(rollout.context), positions)
-    values = values[:, :-1]
     policy = distrax.Categorical(logits=logits[:, :-1])
 
     log_prob = policy.log_prob(rollout.context[:, 1:])
 
-    # value_loss = 0.5 * jnp.square(values - targets).mean(where=policy_mask)
+    # value_loss = 0.5 * jnp.square(values - targets).mean(where=bounds_mask)
     # actor_loss = -(log_prob * advantages).mean(where=policy_mask)
-    value_pred_clipped = rollout.values[:, :-1] + jnp.clip(
-        values - rollout.values[:, :-1], -config.vf_clip, config.vf_clip
+    value_pred_clipped = rollout.values + jnp.clip(
+        values - rollout.values, -config.vf_clip, config.vf_clip
     )
 
     value_losses = jnp.square(values - targets)
     value_losses_clipped = jnp.square(value_pred_clipped - targets)
-    value_loss = 0.5 * jnp.maximum(value_losses, value_losses_clipped).mean(where=policy_mask)
+    value_loss = 0.5 * jnp.maximum(value_losses, value_losses_clipped).mean(where=bounds_mask)
 
     pg_ratio = jnp.exp(log_prob - rollout.log_probs[:, :-1])
     pg_loss1 = pg_ratio * advantages
@@ -88,9 +88,11 @@ def update_step(opt_def, opt_state, model_def, model_state, rollout: UpdateBatch
     batch_len, seq_len = rollout.context.shape
 
     seq_range = jnp.arange(seq_len, dtype=jnp.int32)
-    policy_mask = jnp.logical_and(rollout.policy_mask, seq_range[None, :] < rollout.kv_cache_lengths[:, None])
+    bounds_mask = seq_range[None, :] < rollout.kv_cache_lengths[:, None]
 
-    values = jnp.where(policy_mask, rollout.values, 0.0)
+    policy_mask = jnp.logical_and(rollout.policy_mask, bounds_mask)
+
+    values = jnp.where(bounds_mask, rollout.values, 0.0)
 
     rollout = rollout._replace(
         policy_mask=policy_mask,
@@ -101,11 +103,11 @@ def update_step(opt_def, opt_state, model_def, model_state, rollout: UpdateBatch
 
     # do the update
     diff = nnx.DiffState(0, opt.wrt)
-    grad, metrics = nnx.grad(loss_fn, argnums=diff, has_aux=True)(model, rollout, advantages, targets, config, progress)
+    grad, metrics = nnx.grad(loss_fn, argnums=diff, has_aux=True)(model, rollout, advantages, targets, config, bounds_mask)
 
     opt.update(model, grad)
 
-    metrics['value'] = values.mean(where=policy_mask)
+    metrics['value'] = values.mean(where=bounds_mask)
     metrics['episode_length'] = rollout.kv_cache_lengths.mean()
 
     return nnx.state(opt), nnx.state(model), metrics

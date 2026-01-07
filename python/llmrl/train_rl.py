@@ -21,9 +21,8 @@ def main():
     console = Console()
     logger = create_logger(config, experiment.unique_token, console)
 
-    model_name = "Qwen/Qwen3-4B-Instruct-2507"
     rngs = nnx.Rngs(experiment.params_seed)
-    model, tokenizer, sampling = load_base_model(model_name, rngs)
+    model, tokenizer, sampling = load_base_model(config.base_model, rngs)
     model.initialize_lora(config.lora, rngs=rngs)
 
     checkpointer = Checkpointer(experiment.checkpoints_url)
@@ -31,7 +30,7 @@ def main():
     eval_batch_size = config.eval_envs
     env = make_env(config.env.name, eval_batch_size, experiment.environments_seed, config.env)
 
-    opt = nnx.Optimizer(model=model, tx=optax.MultiSteps(optax.adamw(config.optimizer.lr), every_k_schedule=8), wrt=nnx.Any(ValueParam, nnx.LoRAParam))
+    opt = nnx.Optimizer(model=model, tx=optax.MultiSteps(optax.sgd(optax.warmup_constant_schedule(0, config.optimizer.lr, (100000//4)//10)), every_k_schedule=4), wrt=nnx.Any(ValueParam, nnx.LoRAParam))
     model_def, model_state = nnx.split(model)
     opt_def, opt_state = nnx.split(opt)
 
