@@ -4,7 +4,6 @@ from llmrl.utils.performance import PerformanceTracker
 from llmrl.checkpointer import Checkpointer
 from llmrl.experiement import Experiment
 
-from jax import numpy as jnp
 from llmrl.model.value_network import ValueParam
 import numpy as np
 from flax import nnx
@@ -63,15 +62,15 @@ def train_cli(config_url: str):
         config,
     )
     agent.episode_listener = BufferedEpisodeListener(
-        16,
-        4,
+        config.eval_envs,
+        config.update_envs,
         config.max_seq_length,
-        trainer
+        trainer,
     )
 
     env_indices = np.arange(eval_batch_size, dtype=np.int32)
     rewards = np.zeros((eval_batch_size,), dtype=np.float32)
-    dones = np.zeros((eval_batch_size,), dtype=jnp.bool_)
+    dones = np.zeros((eval_batch_size,), dtype=np.bool_)
 
     obs = env.reset(env_indices)
 

@@ -66,14 +66,14 @@ class Trainer(EpisodeListener):
         self._checkpointer.restore_latest({"opt": opt, "model": model}, opt.wrt)
 
         self._opt_state = nnx.state(opt)
-        self._model_state = nnx.state(model)
+        self._model_provider.model_state = nnx.state(model)
 
     @property
     def progress(self) -> float:
         return self._update_step / self._config.total_update_episodes
 
     def on_episodes(self, batch: UpdateBatch):
-        self._opt_state, self._model_state, metrics = update_step(
+        self._opt_state, new_model_state, metrics = update_step(
             self._opt_def,
             self._opt_state,
             self._model_provider.model_def,
@@ -82,6 +82,8 @@ class Trainer(EpisodeListener):
             self._config.loss,
             jnp.array(self.progress),
         )
+
+        self._model_provider.model_state = new_model_state
 
         metrics["rewards"] = batch.rewards.sum() / batch.rewards.shape[0]
 
@@ -145,13 +147,13 @@ class LocalAgent(Agent, ModelProvider):
             self._tokenizer,
             [
                 [{"role": "system", "content": instructions}]
-                for _ in range(self._config.update_envs)
+                for _ in range(self._config.eval_envs)
             ],
             False,
         )
         self._gen = append_prompt_tokens(
             self._gen,
-            np.arange(self._config.update_envs, dtype=jnp.int32),
+            np.arange(self._config.eval_envs, dtype=np.int32),
             instruction_tokens,
         )
         self._gen = self._gen._replace(
