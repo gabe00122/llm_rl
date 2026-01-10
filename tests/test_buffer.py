@@ -4,7 +4,7 @@ from llmrl.buffer import CircularBuffer
 
 def test_push_and_pop():
     """Test basic push and pop operations."""
-    buffer = CircularBuffer(buffer_size=4, seq_length=2, dtype=np.int32)
+    buffer = CircularBuffer(buffer_size=4, seq_shape=(2,), dtype=np.int32)
     
     buffer.push(np.array([[1, 2], [3, 4], [5, 6]], dtype=np.int32))
     result = buffer.pop_oldest(2)
@@ -14,7 +14,7 @@ def test_push_and_pop():
 
 def test_wrap_around():
     """Test circular wrap-around behavior."""
-    buffer = CircularBuffer(buffer_size=3, seq_length=1, dtype=np.int32)
+    buffer = CircularBuffer(buffer_size=3, seq_shape=(1,), dtype=np.int32)
     
     # Fill and overflow
     buffer.push(np.array([[1], [2], [3]], dtype=np.int32))
@@ -27,7 +27,7 @@ def test_wrap_around():
 
 def test_push_pop_cycle():
     """Test interleaved push/pop operations."""
-    buffer = CircularBuffer(buffer_size=4, seq_length=1, dtype=np.int32)
+    buffer = CircularBuffer(buffer_size=4, seq_shape=(1,), dtype=np.int32)
     
     buffer.push(np.array([[1], [2]], dtype=np.int32))
     buffer.pop_oldest(1)
