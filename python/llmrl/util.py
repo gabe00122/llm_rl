@@ -1,7 +1,5 @@
-import json
 import os
 import jax
-from jax import numpy as jnp
 
 from transformers import AutoTokenizer, PreTrainedTokenizerFast
 from zipp import Path

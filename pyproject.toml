@@ -5,7 +5,6 @@ readme = "README.md"
 requires-python = ">=3.13"
 dynamic = ["version"]
 dependencies = [
-    "datasets>=4.4.1",
     "distrax>=0.1.7",
     "einops>=0.8.1",
     "flax>=0.12.0",
@@ -23,6 +22,7 @@ dependencies = [
     "coolname>=2.2.0",
     "fsspec>=2025.10.0",
     "huggingface-hub>=0.36.0",
+    "typer>=0.21.1",
 ]
 
 [build-system]
@@ -40,7 +40,7 @@ dev = [
 ]
 
 [project.scripts]
-eval_env = "llmrl.eval_env:main"
+llmrl = "llmrl.cli:app"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

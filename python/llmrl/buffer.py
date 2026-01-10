@@ -1,6 +1,4 @@
 from typing import NamedTuple
-import jax
-from jax import numpy as jnp
 import numpy as np
 
 class UpdateBatch(NamedTuple):
@@ -12,66 +10,86 @@ class UpdateBatch(NamedTuple):
     policy_mask: np.ndarray
 
 
+class CircularBuffer:
+    def __init__(self, buffer_size: int, seq_shape: tuple[int, ...], dtype: np.typing.DTypeLike) -> None:
+        self._buffer_size = buffer_size
+        
+        self._size = 0
+        self._start = 0
+        self._end = 0
+        
+        self._data = np.zeros((buffer_size, *seq_shape), dtype=dtype)
+
+    def push(self, data: np.ndarray):
+        start = self._end
+        end = start + data.shape[0]
+
+        if end > self._buffer_size:
+            overflow = end - self._buffer_size
+            self._data[start:] = data[:-overflow]
+            self._data[:overflow] = data[-overflow:]
+        else:
+            self._data[start:end] = data
+
+        self._end = end % self._buffer_size
+        self._size = self._size + data.shape[0]
+
+        if self._size > self._buffer_size:
+            self._start = self._end
+            self._size = self._buffer_size
+
+    def pop_oldest(self, num: int):
+        start = self._start
+        end = start + num
+
+        if end > self._buffer_size:
+            overflow = end - self._buffer_size
+            part1 = self._data[start:]
+            part2 = self._data[:overflow]
+
+            out = np.concatenate((part1, part2), axis=0)
+        else:
+            out = self._data[start:end]
+
+        self._start = end % self._buffer_size
+        self._size -= num
+
+        return out
+
 
 class UpdateBuffer:
     def __init__(self, buffer_size: int, batch_size: int, seq_length: int) -> None:
-        self._buffer_size = buffer_size
         self._batch_size = batch_size
 
-        self.context = np.zeros((buffer_size, seq_length), dtype=np.int32)
-        self.kv_cache_lengths = np.zeros((buffer_size,), dtype=np.int32)
-        self.log_probs = np.zeros((buffer_size, seq_length), dtype=np.float32)
-        self.values = np.zeros((buffer_size, seq_length), dtype=np.float32)
-        self.rewards = np.zeros((buffer_size, seq_length), dtype=np.float32)
-        self.policy_mask = np.zeros((buffer_size, seq_length), dtype=np.bool_)
-
-        self._index = 0
+        self._context = CircularBuffer(buffer_size, (seq_length,), np.int32)
+        self._kv_cache_lengths = CircularBuffer(buffer_size, (), np.int32)
+        self._log_probs = CircularBuffer(buffer_size, (seq_length,), np.float32)
+        self._values = CircularBuffer(buffer_size, (seq_length,), np.float32)
+        self._rewards = CircularBuffer(buffer_size, (seq_length,), np.float32)
+        self._policy_mask = CircularBuffer(buffer_size, (seq_length,), np.bool_)
 
     @property
-    def has_batch(self):
-        return self._index >= self._batch_size
+    def size(self) -> int:
+        return self._context._size
+
+    @property
+    def has_batch(self) -> bool:
+        return self.size >= self._batch_size
     
-    def store(self, done_indices: np.ndarray, context: np.ndarray, kv_cache_lengths: np.ndarray, rewards: np.ndarray, values: np.ndarray, log_probs: np.ndarray, policy_mask: np.ndarray):
-        if self.has_batch:
-            return
-        
-        store_size = done_indices.shape[0]
-        end_index = self._index + store_size
-
-        if end_index > self._buffer_size:
-            trim_amount = end_index - self._buffer_size
-            done_indices = done_indices[:-trim_amount] # todo: we are throwing away good data here
-            end_index = min(end_index, self._buffer_size)
-
-        store_range = range(self._index, end_index)
-
-        self.context[store_range] = context[done_indices]
-        self.kv_cache_lengths[store_range] = kv_cache_lengths[done_indices]
-        self.log_probs[store_range] = log_probs[done_indices]
-        self.values[store_range] = values[done_indices]
-        self.rewards[store_range] = rewards[done_indices]
-        self.policy_mask[store_range] = policy_mask[done_indices]
-
-        self._index = end_index
+    def store(self, batch: UpdateBatch):
+        self._context.push(batch.context)
+        self._kv_cache_lengths.push(batch.kv_cache_lengths)
+        self._log_probs.push(batch.log_probs)
+        self._values.push(batch.values)
+        self._rewards.push(batch.rewards)
+        self._policy_mask.push(batch.policy_mask)
 
     def take_batch(self) -> UpdateBatch:
-        ub = UpdateBatch(
-            context=self.context[:self._batch_size],
-            kv_cache_lengths=self.kv_cache_lengths[:self._batch_size],
-            log_probs=self.log_probs[:self._batch_size],
-            values=self.values[:self._batch_size],
-            rewards=self.rewards[:self._batch_size],
-            policy_mask=self.policy_mask[:self._batch_size],
+        return UpdateBatch(
+            context=self._context.pop_oldest(self._batch_size),
+            kv_cache_lengths=self._kv_cache_lengths.pop_oldest(self._batch_size),
+            log_probs=self._log_probs.pop_oldest(self._batch_size),
+            values=self._values.pop_oldest(self._batch_size),
+            rewards=self._rewards.pop_oldest(self._batch_size),
+            policy_mask=self._policy_mask.pop_oldest(self._batch_size),
         )
-
-        self.context = np.roll(self.context, -self._batch_size, axis=0)
-        self.kv_cache_lengths = np.roll(self.kv_cache_lengths, -self._batch_size, axis=0)
-        self.log_probs = np.roll(self.log_probs, -self._batch_size, axis=0)
-        self.values = np.roll(self.values, -self._batch_size, axis=0)
-        self.rewards = np.roll(self.rewards, -self._batch_size, axis=0)
-        self.policy_mask = np.roll(self.policy_mask, -self._batch_size, axis=0)
-
-        self._index -= self._batch_size
-
-        return ub
-

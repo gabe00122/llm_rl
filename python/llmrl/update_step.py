@@ -1,11 +1,9 @@
 from llmrl.config import LossConfig
-from typing import NamedTuple
 import distrax
 import jax
 from jax import numpy as jnp
 from flax import nnx
 from llmrl.model.qwen3 import Qwen3
-from llmrl.model.value_network import ValueParam
 from llmrl.buffer import UpdateBatch
 
 
@@ -52,20 +50,13 @@ def loss_fn(model: Qwen3, rollout: UpdateBatch, advantages: jax.Array, targets: 
 
     log_prob = policy.log_prob(rollout.context[:, 1:])
 
-    # value_loss = 0.5 * jnp.square(values - targets).mean(where=bounds_mask)
+    value_loss = 0.5 * jnp.square(values - targets).mean(where=bounds_mask)
     # actor_loss = -(log_prob * advantages).mean(where=policy_mask)
-    value_pred_clipped = rollout.values + jnp.clip(
-        values - rollout.values, -config.vf_clip, config.vf_clip
-    )
-
-    value_losses = jnp.square(values - targets)
-    value_losses_clipped = jnp.square(value_pred_clipped - targets)
-    value_loss = 0.5 * jnp.maximum(value_losses, value_losses_clipped).mean(where=bounds_mask)
 
     pg_ratio = jnp.exp(log_prob - rollout.log_probs[:, :-1])
     pg_loss1 = pg_ratio * advantages
     pg_loss2 = (
-        jnp.clip(pg_ratio, 1.0 - config.pg_clip, 1.0 + config.pg_clip) * advantages
+        jnp.clip(pg_ratio, 1.0 - config.pg_clip_low, 1.0 + config.pg_clip_high) * advantages
     )
     actor_loss = -jnp.minimum(pg_loss1, pg_loss2).mean(where=policy_mask)
     

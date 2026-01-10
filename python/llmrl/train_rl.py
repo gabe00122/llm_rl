@@ -1,6 +1,8 @@
+from llmrl.agent.local import Trainer
+from llmrl.agent.local import BufferedEpisodeListener
+from llmrl.utils.performance import PerformanceTracker
 from llmrl.checkpointer import Checkpointer
 from llmrl.experiement import Experiment
-import time
 
 from jax import numpy as jnp
 from llmrl.model.value_network import ValueParam
@@ -14,11 +16,21 @@ from llmrl.env.make import make_env
 from rich.console import Console
 import optax
 
+def _make_optimizer(model, config) -> nnx.Optimizer:
+    lr = optax.warmup_constant_schedule(0, config.optimizer.lr, (100000//4)//10)
+    return nnx.Optimizer(
+        model=model,
+        tx=optax.MultiSteps(
+            optax.adam(lr, b1=0.9, b2=0.95), every_k_schedule=4
+        ), wrt=nnx.Any(ValueParam, nnx.LoRAParam)
+    )
 
-def main():
-    experiment = Experiment.from_config_file("configs/test.json")
+
+def train_cli(config_url: str):
+    experiment = Experiment.from_config_file(config_url)
     config = experiment.config
     console = Console()
+    preformace_tracker = PerformanceTracker()
     logger = create_logger(config, experiment.unique_token, console)
 
     rngs = nnx.Rngs(experiment.params_seed)
@@ -30,21 +42,31 @@ def main():
     eval_batch_size = config.eval_envs
     env = make_env(config.env.name, eval_batch_size, experiment.environments_seed, config.env)
 
-    opt = nnx.Optimizer(model=model, tx=optax.MultiSteps(optax.sgd(optax.warmup_constant_schedule(0, config.optimizer.lr, (100000//4)//10)), every_k_schedule=4), wrt=nnx.Any(ValueParam, nnx.LoRAParam))
-    model_def, model_state = nnx.split(model)
-    opt_def, opt_state = nnx.split(opt)
+    opt = _make_optimizer(model, config)
 
     agent = LocalAgent(
-        model_def,
-        model_state,
-        opt_def,
-        opt_state,
+        model,
         tokenizer,
-        checkpointer,
         config,
-        env.instructions(),
         logger,
+        preformace_tracker,
         rngs.agent(),
+    )
+
+    agent.set_episode_instructions(env.instructions())
+
+    trainer = Trainer(
+        agent,
+        opt,
+        checkpointer,
+        logger,
+        config,
+    )
+    agent.episode_listener = BufferedEpisodeListener(
+        16,
+        4,
+        config.max_seq_length,
+        trainer
     )
 
     env_indices = np.arange(eval_batch_size, dtype=np.int32)
@@ -53,38 +75,9 @@ def main():
 
     obs = env.reset(env_indices)
 
-    correct_count = 0
-    total_count = 0
-
-    env_time = 0.0
-
-    start = time.time()
-    while agent.update_episodes < config.total_update_episodes:
+    while trainer.progress < 1.0:
         env_indices, actions = agent.act(env_indices, obs, rewards, dones)
-
-        env_start = time.perf_counter()
-        obs, rewards, dones = env.step(env_indices, actions)
-        env_time += time.perf_counter() - env_start
-
-        correct_count += rewards.sum().item()
-        total_count += rewards.size
-        # print(f"Score: {rewards.sum().item() / rewards.size:.2%}")
-
-    total_time = time.time() - start
-    print(f"Percent Correct: {correct_count / total_count:.2%}")
-
-    print(f"Delta: {total_time}")
-    print(f"Total Episodes: {total_count}")
-    print(f"Reset Time: {agent._reset_time / total_time:.2%}")
-    print(f"Gen Time: {agent._gen_time / total_time:.2%}")
-    print(f"Decode Time: {agent._decode_time / total_time:.2%}")
-    print(f"Append Time: {agent._append_time / total_time:.2%}")
-    print(f"Env Time: {env_time / total_time:.2%}")
-    print(f"Accounted Time: {1 - (total_time - agent._reset_time - agent._gen_time - agent._decode_time - agent._append_time - env_time) / total_time:.2%}")
-    print(f"Turns per second: {total_count / total_time}")
+        with preformace_tracker.time("env_step"):
+            obs, rewards, dones = env.step(env_indices, actions)
 
     checkpointer.close()
-
-
-if __name__ == "__main__":
-    main()

@@ -30,7 +30,7 @@ class Experiment:
         self.checkpoints_url = f"{base_dir.rstrip('/')}/{self.unique_token}/checkpoints"
 
         # filesystem handle reused everywhere
-        self.fs, self.root = fsspec.core.url_to_fs(self.experiment_url)
+        self.fs, self.root = fsspec.url_to_fs(self.experiment_url)
 
         # derived paths that *fs* understands
         self.config_path = f"{self.root}/config.json"
@@ -57,7 +57,7 @@ class Experiment:
     @classmethod
     def load(cls, unique_token: str, base_dir: str = "results") -> "Experiment":
         experiment_url = f"{base_dir.rstrip('/')}/{unique_token}"
-        fs, root = fsspec.core.url_to_fs(experiment_url)
+        fs, root = fsspec.url_to_fs(experiment_url)
 
         with fs.open(f"{root}/config.json", "r") as f:
             config = load_config(f.read())
@@ -109,5 +109,5 @@ def generate_unique_token() -> str:
 def get_git_hash() -> str:
     try:
         return subprocess.check_output(["git", "rev-parse", "HEAD"]).strip().decode()
-    except subprocess.CalledProcessError:
+    except:
         return ""

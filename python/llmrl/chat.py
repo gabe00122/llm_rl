@@ -1,5 +1,4 @@
 from llmrl.model.value_network import ValueParam
-import optax
 from llmrl.checkpointer import Checkpointer
 from llmrl.experiement import Experiment
 import time
@@ -17,7 +16,7 @@ from transformers import PreTrainedTokenizerFast
 from rich.console import Console
 from rich.markdown import Markdown
 
-from llmrl.config import LoraConfig, SamplingConfig
+from llmrl.config import SamplingConfig
 from llmrl.model import Qwen3
 from llmrl.base_model_loader import load_base_model
 
@@ -299,10 +298,9 @@ def main():
     rngs = nnx.Rngs(experiment.params_seed)
     model, tokenizer, sampling = load_base_model(config.base_model, rngs)
     model.initialize_lora(config.lora, rngs=rngs)
-    opt = nnx.Optimizer(model=model, tx=optax.sgd(optax.warmup_constant_schedule(0, config.optimizer.lr, (100000//4)//10)), wrt=nnx.Any(ValueParam, nnx.LoRAParam))
 
     checkpointer = Checkpointer(experiment.checkpoints_url)
-    checkpointer.restore_latest({"opt": opt, "model": model}, opt.wrt)
+    checkpointer.restore_latest({"opt": orbax.checkpoint.PLACEHOLDER, "model": model}, nnx.Any(ValueParam, nnx.LoRAParam))
 
     batch_size = 1
     seq_length = 16384  # 512

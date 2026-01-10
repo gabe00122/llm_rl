@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Any, NamedTuple
+from typing import Any
 from llmrl.model.qwen3 import Qwen3
 from rich.progress import track
 from safetensors import safe_open

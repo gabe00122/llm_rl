@@ -16,14 +16,14 @@
         "use_wandb": true
     },
     "optimizer": {
-        "lr": 0.02
+        "lr": 0.0002
     },
     "loss": {
         "gae_lambda": 0.997,
         "gae_discount": 0.997,
-        "vf_coef": 1.0,
-        "vf_clip": 0.28,
-        "pg_clip": 0.28
+        "vf_coef": 10.0,
+        "pg_clip_high": 0.20,
+        "pg_clip_low": 0.28
     },
     "env": {
         "name": "arithmetic",
