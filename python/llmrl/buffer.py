@@ -1,5 +1,7 @@
 from typing import NamedTuple
+
 import numpy as np
+
 
 class UpdateBatch(NamedTuple):
     context: np.ndarray
@@ -9,15 +11,46 @@ class UpdateBatch(NamedTuple):
     rewards: np.ndarray
     policy_mask: np.ndarray
 
+    def save_npz(
+        self,
+        file,
+        *,
+        compressed: bool = True,
+    ):
+        """Save the batch to an .npz file."""
+
+        payload = self._asdict()
+        if compressed:
+            np.savez_compressed(file, **payload)
+        else:
+            np.savez(file, **payload)
+
+    @classmethod
+    def load_npz(
+        cls,
+        file,
+    ) -> "UpdateBatch":
+        """Load the batch from an .npz file."""
+        with np.load(file, allow_pickle=False) as data:
+            missing = [k for k in cls._fields if k not in data.files]
+            if missing:
+                raise KeyError(f"Missing keys in {file}: {missing}")
+
+            arrays = {k: data[k] for k in cls._fields}
+
+        return cls(**arrays)
+
 
 class CircularBuffer:
-    def __init__(self, buffer_size: int, seq_shape: tuple[int, ...], dtype: np.typing.DTypeLike) -> None:
+    def __init__(
+        self, buffer_size: int, seq_shape: tuple[int, ...], dtype: np.typing.DTypeLike
+    ) -> None:
         self._buffer_size = buffer_size
-        
+
         self._size = 0
         self._start = 0
         self._end = 0
-        
+
         self._data = np.zeros((buffer_size, *seq_shape), dtype=dtype)
 
     def push(self, data: np.ndarray):
@@ -63,7 +96,7 @@ class UpdateBuffer:
 
         self._context = CircularBuffer(buffer_size, (seq_length,), np.int32)
         self._kv_cache_lengths = CircularBuffer(buffer_size, (), np.int32)
-        self._log_probs = CircularBuffer(buffer_size, (seq_length,), np.float32)
+        self._log_probs = CircularBuffer(buffer_size, (seq_length - 1,), np.float32)
         self._values = CircularBuffer(buffer_size, (seq_length,), np.float32)
         self._rewards = CircularBuffer(buffer_size, (seq_length,), np.float32)
         self._policy_mask = CircularBuffer(buffer_size, (seq_length,), np.bool_)
@@ -75,7 +108,7 @@ class UpdateBuffer:
     @property
     def has_batch(self) -> bool:
         return self.size >= self._batch_size
-    
+
     def store(self, batch: UpdateBatch):
         self._context.push(batch.context)
         self._kv_cache_lengths.push(batch.kv_cache_lengths)

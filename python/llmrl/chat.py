@@ -1,24 +1,23 @@
-from llmrl.model.value_network import ValueParam
-from llmrl.checkpointer import Checkpointer
-from llmrl.experiement import Experiment
 import time
 from typing import Any, Literal, NamedTuple
+
 import jax
-from jax import numpy as jnp
-from llmrl.util import batched_put, batched_take
 import numpy as np
-from flax import nnx
 
 # from tokenizers import Tokenizer
 from distrax import Categorical
-from transformers import PreTrainedTokenizerFast
-
+from flax import nnx
+from jax import numpy as jnp
+from llmrl.base_model_loader import load_base_model
+from llmrl.checkpointer import Checkpointer
+from llmrl.config import SamplingConfig
+from llmrl.experiement import Experiment
+from llmrl.model import Qwen3
+from llmrl.model.value_network import ValueParam
+from llmrl.util import batched_put, batched_take
 from rich.console import Console
 from rich.markdown import Markdown
-
-from llmrl.config import SamplingConfig
-from llmrl.model import Qwen3
-from llmrl.base_model_loader import load_base_model
+from transformers import PreTrainedTokenizerFast
 
 PAD_ID = 151643
 EOS_1 = 151645
@@ -75,7 +74,14 @@ def decode_responses(
     turn_start_positions = np.array(gen.turn_start_positions)
     context_length = np.array(gen.context_length)
 
-    output = [tokenizer.decode(context[b, turn_start_positions[b] : context_length[b] - 2]) for b in indices]
+    output = [
+        tokenizer.decode(context[b, turn_start_positions[b] : context_length[b] - 2])
+        for b in indices
+    ]
+    output = [
+        tokenizer.decode(context[b, turn_start_positions[b] : context_length[b] - 2])
+        for b in indices
+    ]
 
     return indices, output
 
@@ -111,7 +117,7 @@ def create_generation_state(
         policy_mask=jnp.zeros((batch_size, seq_len), jnp.bool_),
         context=jnp.zeros((batch_size, seq_len), jnp.int32),
         turn_finished=jnp.zeros(batch_size, jnp.bool_),
-        log_probs=jnp.zeros((batch_size, seq_len), jnp.float32),
+        log_probs=jnp.zeros((batch_size, seq_len - 1), jnp.float32),
         values=jnp.zeros((batch_size, seq_len), jnp.float32),
         rng_key=rng_key,
     )
@@ -151,21 +157,35 @@ def append_prompt_tokens(
         turn_finished=jnp.array(turn_finished),
     )
 
-def append_user_prompts(state: GenerationState, batch_indices: np.ndarray, tokenizer: PreTrainedTokenizerFast, prompts: list[str]):
+
+def append_user_prompts(
+    state: GenerationState,
+    batch_indices: np.ndarray,
+    tokenizer: PreTrainedTokenizerFast,
+    prompts: list[str],
+):
     conversation_turns = [[{"role": "user", "content": content}] for content in prompts]
     prompt_tokens = encode_input(tokenizer, conversation_turns)
 
     return append_prompt_tokens(state, batch_indices, prompt_tokens)
 
+
 @jax.jit(donate_argnums=(0,))
 def reset_episodes(state: GenerationState, done_mask: jax.Array) -> GenerationState:
     return state._replace(
-        context_length = jnp.where(done_mask, state.env_instruction_length, state.context_length),
+        context_length=jnp.where(
+            done_mask, state.env_instruction_length, state.context_length
+        ),
         # set to zero to stay more on policy
-        kv_cache_length = jnp.where(done_mask, 0, state.kv_cache_length), #jnp.where(done_mask, state.env_instruction_length, state.kv_cache_length),
+        kv_cache_length=jnp.where(
+            done_mask, 0, state.kv_cache_length
+        ),  # jnp.where(done_mask, state.env_instruction_length, state.kv_cache_length),
     )
 
-@jax.jit(static_argnames=("model_def", "sampling", "wait_for"), donate_argnames=("gen",))
+
+@jax.jit(
+    static_argnames=("model_def", "sampling", "wait_for"), donate_argnames=("gen",)
+)
 def generate(
     model_def,
     model_state,
@@ -185,27 +205,25 @@ def generate(
         in_tokens = batched_take(carry.context, carry.kv_cache_length)
 
         logits, value, kv_cache = model(
-            in_tokens[..., None],
+            in_tokens[..., None],  # add time axis
             carry.kv_cache_length[..., None],
             carry.kv_cache,
         )
+        logits = logits.squeeze(-2)  # remove time axis
+        value = nnx.sigmoid(value.squeeze(-1))
 
         sample_key, rng_key = jax.random.split(carry.rng_key)
 
-        next_log_probs = carry.log_probs
+        next_values = batched_put(carry.values, carry.kv_cache_length, value)
 
-        next_values = batched_put(carry.values, carry.kv_cache_length, value.squeeze(-1))
-        if sampling == "greedy":
-            sample_tokens = jnp.argmax(logits.squeeze(-2), -1)
-        elif sampling == "simple":
-            dist = Categorical(logits=logits.squeeze(-2))
-            sample_tokens: jax.Array = dist.sample(seed=sample_key)
-            log_prob: jax.Array = dist.log_prob(sample_tokens)
-            next_log_probs = batched_put(next_log_probs, carry.kv_cache_length, log_prob)
-        else:
-            sample_tokens = sample(sampling, logits.squeeze(axis=-2), sample_key)
+        dist = Categorical(logits=logits)
+        sample_tokens: jax.Array = dist.sample(seed=sample_key)
+        log_prob: jax.Array = dist.log_prob(sample_tokens)
+        next_log_probs = batched_put(carry.log_probs, carry.kv_cache_length, log_prob)
 
-        next_kv_cache_length = jnp.where(carry.turn_finished, carry.kv_cache_length, carry.kv_cache_length + 1)
+        next_kv_cache_length = jnp.where(
+            carry.turn_finished, carry.kv_cache_length, carry.kv_cache_length + 1
+        )
         next_context_length = jnp.maximum(
             carry.context_length, next_kv_cache_length + 1
         )
@@ -223,7 +241,7 @@ def generate(
         )
         # we check to make sure we aren't reading the prompt and that the model sampled a end token
         next_finished = jnp.logical_or(
-            next_finished, jnp.logical_and(in_tokens == EOS_1, use_sample)
+            next_finished, jnp.logical_and(out_tokens == EOS_1, use_sample)
         )
 
         policy_mask = batched_put(carry.policy_mask, carry.kv_cache_length, use_sample)
@@ -264,7 +282,9 @@ def chat(
     batch_indices = np.arange(batch_size, dtype=np.int32)
 
     if system_prompt is not None:
-        text = [[{"role": "system", "content": system_prompt}] for _ in range(batch_size)]
+        text = [
+            [{"role": "system", "content": system_prompt}] for _ in range(batch_size)
+        ]
         prompt_tokens = encode_input(tokenizer, text, add_generation_prompt=False)
         gen = append_prompt_tokens(gen, batch_indices, prompt_tokens)
 
@@ -288,23 +308,37 @@ def chat(
         _, output_text = decode_responses(tokenizer, gen)
         console.print("--------")
         console.print(Markdown(output_text[0]))
-        console.print(f"TPS: {(end_tokens - start_tokens) / (end_time - start_time):.2}")
+        console.print(
+            f"TPS: {(end_tokens - start_tokens) / (end_time - start_time):.2}"
+        )
 
 
 def main():
     experiment = Experiment.load("winged-tortoise-of-glory")
     config = experiment.config
-    
+
     rngs = nnx.Rngs(experiment.params_seed)
     model, tokenizer, sampling = load_base_model(config.base_model, rngs)
     model.initialize_lora(config.lora, rngs=rngs)
 
     checkpointer = Checkpointer(experiment.checkpoints_url)
-    checkpointer.restore_latest({"opt": orbax.checkpoint.PLACEHOLDER, "model": model}, nnx.Any(ValueParam, nnx.LoRAParam))
+    checkpointer.restore_latest(
+        {"opt": orbax.checkpoint.PLACEHOLDER, "model": model},
+        nnx.Any(ValueParam, nnx.LoRAParam),
+    )
 
     batch_size = 1
     seq_length = 16384  # 512
-    chat(Console(), model, tokenizer, sampling, batch_size, seq_length, rngs, system_prompt="Solve the arithmetic expression using +, -, * or /. Show your work if needed, but end with only the numeric result on its own line. Always output with decimals such as 123.456")
+    chat(
+        Console(),
+        model,
+        tokenizer,
+        sampling,
+        batch_size,
+        seq_length,
+        rngs,
+        system_prompt="Solve the arithmetic expression using +, -, * or /. Show your work if needed, but end with only the numeric result on its own line. Always output with decimals such as 123.456",
+    )
 
 
 if __name__ == "__main__":

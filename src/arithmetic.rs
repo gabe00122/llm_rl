@@ -33,7 +33,7 @@ impl EnvShared for ArithmeticShared {
 
     fn new(settings: Self::Settings) -> Self {
         Self {
-            number_re: Regex::new(r"[\d,]+(?:\.\d*)?").unwrap(),
+            number_re: Regex::new(r"-?[\d,]+(?:\.\d*)?").unwrap(),
             settings,
         }
     }

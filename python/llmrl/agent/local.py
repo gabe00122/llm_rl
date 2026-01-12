@@ -1,5 +1,3 @@
-from llmrl.model.qwen3 import Qwen3
-from llmrl.checkpointer import Checkpointer
 from typing import Protocol, override
 
 import jax
@@ -18,8 +16,10 @@ from llmrl.chat import (
     generate,
     reset_episodes,
 )
+from llmrl.checkpointer import Checkpointer
 from llmrl.config import Config
 from llmrl.logger import BaseLogger
+from llmrl.model.qwen3 import Qwen3
 from llmrl.update_step import update_step
 from llmrl.utils.performance import PerformanceTracker
 from transformers import PreTrainedTokenizerFast
@@ -40,6 +40,7 @@ class Trainer(EpisodeListener):
         model_provider: ModelProvider,
         optimizer: nnx.Optimizer,
         checkpointer: Checkpointer,
+        performance: PerformanceTracker,
         logger: BaseLogger,
         config: Config,
     ):
@@ -47,22 +48,26 @@ class Trainer(EpisodeListener):
         self._opt_def, self._opt_state = nnx.split(optimizer)
 
         self._checkpointer = checkpointer
-
+        self._performance = performance
         self._logger = logger
         self._config = config
         self._update_step = 0
 
     def save_checkpoint(self):
         opt = nnx.merge(self._opt_def, self._opt_state)
-        model = nnx.merge(self._model_provider.model_def, self._model_provider.model_state)
+        model = nnx.merge(
+            self._model_provider.model_def, self._model_provider.model_state
+        )
         self._checkpointer.save(
             {"opt": opt, "model": model}, self._update_step, opt.wrt
         )
-    
+
     def restore_checkpoint(self):
         # todo we need to restore the step as well
         opt = nnx.merge(self._opt_def, self._opt_state)
-        model = nnx.merge(self._model_provider.model_def, self._model_provider.model_state)
+        model = nnx.merge(
+            self._model_provider.model_def, self._model_provider.model_state
+        )
         self._checkpointer.restore_latest({"opt": opt, "model": model}, opt.wrt)
 
         self._opt_state = nnx.state(opt)
@@ -73,25 +78,36 @@ class Trainer(EpisodeListener):
         return self._update_step / self._config.total_update_episodes
 
     def on_episodes(self, batch: UpdateBatch):
-        self._opt_state, new_model_state, metrics = update_step(
-            self._opt_def,
-            self._opt_state,
-            self._model_provider.model_def,
-            self._model_provider.model_state,
-            batch,
-            self._config.loss,
-            jnp.array(self.progress),
-        )
+        with self._performance.time("update_step"):
+            self._opt_state, new_model_state, metrics = update_step(
+                self._opt_def,
+                self._opt_state,
+                self._model_provider.model_def,
+                self._model_provider.model_state,
+                batch,
+                self._config.loss,
+                jnp.array(self.progress),
+            )
 
         self._model_provider.model_state = new_model_state
 
         metrics["rewards"] = batch.rewards.sum() / batch.rewards.shape[0]
+        metrics["performance"] = self._performance.total_time_percentages()
+        self._performance.reset()
 
         self._logger.log_dict(metrics, self._update_step)
         self._update_step += 1
 
         if self._update_step % self._config.checkpoint_every == 0:
             self.save_checkpoint()
+
+
+class EpisodeSaver(EpisodeListener):
+    def __init__(self, file: str):
+        self._file = file
+
+    def on_episodes(self, batch: UpdateBatch):
+        batch.save_npz(self._file, compressed=False)
 
 
 class MultiEpisodeListener(EpisodeListener):
@@ -104,7 +120,13 @@ class MultiEpisodeListener(EpisodeListener):
 
 
 class BufferedEpisodeListener(EpisodeListener):
-    def __init__(self, buffer_size: int, batch_size: int, seq_length: int, listener: EpisodeListener):
+    def __init__(
+        self,
+        buffer_size: int,
+        batch_size: int,
+        seq_length: int,
+        listener: EpisodeListener,
+    ):
         self._listener = listener
         self._buffer = UpdateBuffer(buffer_size, batch_size, seq_length)
 
@@ -140,7 +162,9 @@ class LocalAgent(Agent, ModelProvider):
             kv_cache, self._config.eval_envs, self._config.max_seq_length, self._rng_key
         )
 
-        self._rewards = np.zeros(shape, dtype=np.float32)
+        self._rewards = np.zeros(
+            (self._config.eval_envs, self._config.max_seq_length), dtype=np.float32
+        )
 
     def set_episode_instructions(self, instructions: str):
         instruction_tokens = encode_input(
@@ -173,7 +197,7 @@ class LocalAgent(Agent, ModelProvider):
         dones: np.ndarray,
     ) -> tuple[np.ndarray, list[str]]:
         kv_cache_lengths = np.array(self._gen.kv_cache_length)
-        self._rewards[batch_indices, kv_cache_lengths[batch_indices] - 2] = rewards
+        self._rewards[batch_indices, kv_cache_lengths[batch_indices]] = rewards
 
         done_idx = batch_indices[np.where(dones)]
 
@@ -183,27 +207,27 @@ class LocalAgent(Agent, ModelProvider):
                     UpdateBatch(
                         np.array(self._gen.context)[done_idx],
                         kv_cache_lengths[done_idx],
-                        self._rewards[done_idx],
-                        np.array(self._gen.values)[done_idx],
                         np.array(self._gen.log_probs)[done_idx],
+                        np.array(self._gen.values)[done_idx],
+                        self._rewards[done_idx],
                         np.array(self._gen.policy_mask)[done_idx],
                     )
                 )
-            
+
             with self._performance_tracker.time("reset"):
                 done_mask = np.zeros((self._config.eval_envs,), np.bool_)
                 done_mask[batch_indices] = dones
                 self._gen: GenerationState = reset_episodes(self._gen, done_mask)
                 self._rewards[done_idx] = 0.0
 
-        with self._performance_tracker.time("encode"): 
+        with self._performance_tracker.time("encode"):
             self._gen = append_user_prompts(
                 self._gen, batch_indices, self._tokenizer, obs
             )
 
         with self._performance_tracker.time("generate"):
             self._gen = generate(
-                self.model_def, self.model_state, "simple", self._gen, 4
+                self.model_def, self.model_state, "simple", self._gen, 1
             )
 
         with self._performance_tracker.time("decode"):

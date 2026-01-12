@@ -3,8 +3,7 @@ from typing import Any
 import jax
 from flax import nnx
 from jax import numpy as jnp
-
-from llmrl.config import LoraConfig, LLMConfig
+from llmrl.config import LLMConfig, LoraConfig
 from llmrl.model.attention import KVCache
 from llmrl.model.layer import Qwen3Layer
 from llmrl.model.util import load_param
@@ -48,7 +47,7 @@ class Qwen3(nnx.Module):
             rngs=rngs,
         )
 
-        self.value_net = ValueNetwork(config.embed, 2048, rngs=rngs)
+        self.value_net = ValueNetwork(config.embed, 4096 * 2, rngs=rngs)
 
     def initialize_lora(self, lora_config: LoraConfig, *, rngs: nnx.Rngs):
         for layer in self.layers:
