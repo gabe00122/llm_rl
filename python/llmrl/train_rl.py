@@ -28,7 +28,7 @@ def _make_optimizer(model, config: Config) -> nnx.Optimizer:
     )
     return nnx.Optimizer(
         model=model,
-        tx=optax.sgd(lr),
+        tx=optax.MultiSteps(optax.adam(lr), every_k_schedule=4),
         wrt=nnx.Any(ValueParam, nnx.LoRAParam),
     )
 
