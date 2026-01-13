@@ -185,7 +185,7 @@ class LocalAgent(Agent, ModelProvider):
         )
 
     @override
-    def reset(self):
+    def reset(self) -> None:
         pass
 
     @override
