@@ -10,28 +10,28 @@ from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
+import orbax.checkpoint as ocp
 from flax import nnx
-from rich.console import Console
-from rich.progress import (
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    BarColumn,
-    TaskProgressColumn,
-)
-
 from llmrl.agent.base import Agent
 from llmrl.agent.lite import LiteAgent
 from llmrl.agent.local import LocalAgent
 from llmrl.base_model_loader import load_base_model
 from llmrl.checkpointer import Checkpointer
-from llmrl.config import Config, ArithmeticEnvConfig, WordleEnvConfig
+from llmrl.config import ArithmeticEnvConfig, Config, WordleEnvConfig
 from llmrl.env.base import Env
 from llmrl.env.make import make_env
 from llmrl.experiement import Experiment
 from llmrl.logger import BaseLogger, ConsoleLogger
 from llmrl.model.value_network import ValueParam
 from llmrl.utils.performance import PerformanceTracker
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+)
 
 
 @dataclass
@@ -85,19 +85,24 @@ def _run_eval_loop(
         task = progress.add_task("Evaluating...", total=num_episodes)
 
         while len(episode_rewards) < num_episodes:
-            response_indices, actions = agent.act(env_indices, obs, rewards, dones)
-            obs, rewards, dones = env.step(response_indices, actions)
+            env_indices, actions = agent.act(env_indices, obs, rewards, dones)
+            obs, rewards, dones = env.step(env_indices, actions)
 
             # Accumulate rewards for current episodes
-            current_episode_rewards[response_indices] += rewards
+            current_episode_rewards[env_indices] += rewards
 
             # Record completed episodes
-            done_indices = response_indices[dones]
+            done_indices = env_indices[dones]
             for idx in done_indices:
                 if len(episode_rewards) < num_episodes:
                     episode_rewards.append(current_episode_rewards[idx])
                     current_episode_rewards[idx] = 0.0
-                    progress.update(task, completed=len(episode_rewards))
+
+            if dones.any():
+                console.print(f"Episode rewards: {np.array(episode_rewards).mean()}")
+                progress.update(task, completed=len(episode_rewards))
+
+    agent.close()
 
     episode_rewards_arr = np.array(episode_rewards)
     return EvalResult(
@@ -152,7 +157,6 @@ def eval_openrouter(
     elif env_name == "wordle":
         env_config = WordleEnvConfig(
             max_guesses=wordle_max_guesses,
-            words=wordle_words or ["apple", "beach", "chair", "dance", "eagle"],
         )
     else:
         raise ValueError(f"Unknown environment: {env_name}")
@@ -223,14 +227,14 @@ def eval_checkpoint(
     checkpointer = Checkpointer(experiment.checkpoints_url)
     if checkpoint_step is not None:
         checkpointer.restore(
-            {"model": model},
+            {"model": model, "opt": ocp.PLACEHOLDER},
             checkpoint_step,
             nnx.Any(ValueParam, nnx.LoRAParam),
         )
         console.print(f"[bold]Checkpoint step:[/bold] {checkpoint_step}")
     else:
         checkpointer.restore_latest(
-            {"model": model},
+            {"model": model, "opt": ocp.PLACEHOLDER},
             nnx.Any(ValueParam, nnx.LoRAParam),
         )
         console.print(

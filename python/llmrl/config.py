@@ -1,9 +1,11 @@
 import json
 import random
 from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 # Environment Config
+
 
 class ArithmeticEnvConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -11,11 +13,12 @@ class ArithmeticEnvConfig(BaseModel):
     max_x: int
     max_y: int
 
+
 class WordleEnvConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     name: Literal["wordle"] = "wordle"
     max_guesses: int
-    words: list[str]
+
 
 # Base Model Config
 class LLMConfig(BaseModel):
@@ -38,6 +41,7 @@ class SamplingConfig(BaseModel):
     temperature: float
     top_k: int
     top_p: float
+
 
 # experiment config
 class LoraConfig(BaseModel):
@@ -79,7 +83,6 @@ class LossConfig(BaseModel):
     vf_coef: float
     pg_clip_high: float
     pg_clip_low: float
-
 
 
 class Config(BaseModel):

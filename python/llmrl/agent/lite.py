@@ -1,8 +1,9 @@
+import concurrent.futures
+from concurrent.futures.thread import ThreadPoolExecutor
 from typing import Any, override
 
 import numpy as np
-from litellm import completion
-
+from litellm import ModelResponse, completion
 from llmrl.agent.base import Agent
 
 
@@ -27,6 +28,9 @@ class LiteAgent(Agent):
         self._instructions: str | None = None
         self._messages: list[list[dict[str, Any]]] = []
 
+        self._pending_futures = []
+        self._executor = ThreadPoolExecutor(max_workers=agent_count)
+
         self.reset()
 
     def set_episode_instructions(self, instructions: str) -> None:
@@ -41,6 +45,25 @@ class LiteAgent(Agent):
         if self._instructions is not None:
             for messages in self._messages:
                 messages.append({"role": "system", "content": self._instructions})
+
+    def _complete_with_retry(self, id, messages) -> tuple[int, ModelResponse]:
+        reasoning_effort = "high"
+        for _ in range(3):
+            try:
+                return id, completion(
+                    messages=messages,
+                    model=self._model,
+                    base_url=self._base_url,
+                    reasoning_effort=reasoning_effort,
+                )
+            except Exception as e:
+                print(f"Error: {e}")
+        return id, completion(
+            messages=messages,
+            model=self._model,
+            base_url=self._base_url,
+            reasoning_effort=reasoning_effort,
+        )
 
     @override
     def act(
@@ -77,15 +100,29 @@ class LiteAgent(Agent):
         for idx, observation in zip(batch_indices, obs):
             self._messages[idx].append({"role": "user", "content": observation})
 
-            response = completion(
-                model=self._model,
-                messages=self._messages[idx],
-                base_url=self._base_url,
+            self._pending_futures.append(
+                self._executor.submit(
+                    self._complete_with_retry, idx, self._messages[idx]
+                )
             )
-            # litellm.completion returns ModelResponse when stream=False (default)
+
+        done_futures, pending_futures = concurrent.futures.wait(
+            self._pending_futures, return_when="FIRST_COMPLETED"
+        )
+        self._pending_futures = list(pending_futures)
+
+        action_indices = []
+        for future in done_futures:
+            idx, response = future.result()
             content = response.choices[0].message.content or ""  # type: ignore[union-attr]
 
             self._messages[idx].append({"role": "assistant", "content": content})
+            action_indices.append(idx)
             action_texts.append(content)
 
-        return batch_indices.copy(), action_texts
+        return np.array(action_indices, dtype=np.int32), action_texts
+
+    def close(self):
+        for future in self._pending_futures:
+            future.cancel()
+        self._executor.shutdown()

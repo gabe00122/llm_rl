@@ -1,6 +1,7 @@
 import os
-import jax
 
+import jax
+from jax import numpy as jnp
 from transformers import AutoTokenizer, PreTrainedTokenizerFast
 from zipp import Path
 
@@ -50,3 +51,11 @@ def batched_take(target: jax.Array, indices: jax.Array) -> jax.Array:
         indices_are_sorted=True,
         mode="promise_in_bounds",
     )
+
+
+def batched_put_where(
+    target: jax.Array, indices: jax.Array, values: jax.Array, where: jax.Array
+) -> jax.Array:
+    original = batched_take(target, indices)
+    values = jnp.where(where, values, original)
+    return batched_put(target, indices, values)

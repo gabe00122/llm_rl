@@ -14,7 +14,7 @@ from llmrl.config import SamplingConfig
 from llmrl.experiement import Experiment
 from llmrl.model import Qwen3
 from llmrl.model.value_network import ValueParam
-from llmrl.util import batched_put, batched_take
+from llmrl.util import batched_put, batched_put_where, batched_take
 from rich.console import Console
 from rich.markdown import Markdown
 from transformers import PreTrainedTokenizerFast
@@ -75,11 +75,7 @@ def decode_responses(
     context_length = np.array(gen.context_length)
 
     output = [
-        tokenizer.decode(context[b, turn_start_positions[b] : context_length[b] - 2])
-        for b in indices
-    ]
-    output = [
-        tokenizer.decode(context[b, turn_start_positions[b] : context_length[b] - 2])
+        tokenizer.decode(context[b, turn_start_positions[b] : context_length[b] - 1])
         for b in indices
     ]
 
@@ -144,10 +140,14 @@ def append_prompt_tokens(
     for i, prompt in zip(batch_indices, prompts):
         start = context_length[i].item()
         end = start + prompt.shape[0]
-        context[i, start:end] = prompt
-        # prompt_mask = prompt_mask.at[i, start:end].set(np.ones_like(prompt, np.bool_))
+        safe_end = min(end, context.shape[1])
+        if safe_end < end:
+            delta = end - safe_end
+            prompt = prompt[:-delta]
 
-        turn_start_positions[i] = end
+        context[i, start:safe_end] = prompt
+
+        turn_start_positions[i] = safe_end
 
     return state._replace(
         context=context,
@@ -214,46 +214,50 @@ def generate(
 
         sample_key, rng_key = jax.random.split(carry.rng_key)
 
-        next_values = batched_put(carry.values, carry.kv_cache_length, value)
-
         dist = Categorical(logits=logits)
         sample_tokens: jax.Array = dist.sample(seed=sample_key)
         log_prob: jax.Array = dist.log_prob(sample_tokens)
-        next_log_probs = batched_put(carry.log_probs, carry.kv_cache_length, log_prob)
 
-        next_kv_cache_length = jnp.where(
-            carry.turn_finished, carry.kv_cache_length, carry.kv_cache_length + 1
-        )
-        next_context_length = jnp.maximum(
-            carry.context_length, next_kv_cache_length + 1
-        )
+        # store everything
+        over_start_position = carry.kv_cache_length + 1 >= carry.turn_start_positions
+        turn_finished = carry.turn_finished | (carry.kv_cache_length + 2 >= seq_length)
+        use_sample = ~turn_finished & over_start_position
 
-        use_sample = next_kv_cache_length >= carry.turn_start_positions
-        out_tokens = jnp.where(
-            use_sample, sample_tokens, batched_take(carry.context, next_kv_cache_length)
+        kv_cache_length = jnp.where(
+            turn_finished, carry.kv_cache_length, carry.kv_cache_length + 1
         )
-
-        next_context = batched_put(carry.context, next_kv_cache_length, out_tokens)
-
-        # check for finished states
-        next_finished = jnp.logical_or(
-            carry.turn_finished, next_context_length >= seq_length
-        )
-        # we check to make sure we aren't reading the prompt and that the model sampled a end token
-        next_finished = jnp.logical_or(
-            next_finished, jnp.logical_and(out_tokens == EOS_1, use_sample)
+        context_length = jnp.where(
+            turn_finished,
+            carry.context_length,
+            jnp.maximum(carry.context_length, carry.kv_cache_length + 2),
         )
 
-        policy_mask = batched_put(carry.policy_mask, carry.kv_cache_length, use_sample)
+        context = batched_put_where(
+            carry.context, kv_cache_length, sample_tokens, use_sample
+        )
+        log_probs = batched_put_where(
+            carry.log_probs, carry.kv_cache_length, log_prob, use_sample
+        )
+        # we want to track values even for prompt tokens, hence no use_sample check
+        values = batched_put_where(
+            carry.values, carry.kv_cache_length, value, ~turn_finished
+        )
+
+        # we might be able to drop the ~turn_finished filter here
+        policy_mask = batched_put_where(
+            carry.policy_mask, carry.kv_cache_length, use_sample, ~turn_finished
+        )
+
+        turn_finished = turn_finished | ((in_tokens == EOS_1) & over_start_position)
 
         return carry._replace(
             kv_cache=kv_cache,
-            kv_cache_length=next_kv_cache_length,
-            context_length=next_context_length,
-            context=next_context,
-            turn_finished=next_finished,
-            log_probs=next_log_probs,
-            values=next_values,
+            kv_cache_length=kv_cache_length,
+            context_length=context_length,
+            context=context,
+            turn_finished=turn_finished,
+            log_probs=log_probs,
+            values=values,
             policy_mask=policy_mask,
             rng_key=rng_key,
         )

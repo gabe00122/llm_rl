@@ -1,11 +1,11 @@
 {
     "seed": "random",
     "base_model": "Qwen/Qwen3-4B-Instruct-2507",
-    "eval_envs": 64,
-    "update_envs": 4,
-    "max_seq_length": 512,
-    "total_update_episodes": 10000,
-    "checkpoint_every": 20000,
+    "eval_envs": 16,
+    "update_envs": 1,
+    "max_seq_length": 4096,
+    "total_update_episodes": 16000,
+    "checkpoint_every": 500,
     "lora": {
         "mlp": true,
         "attn": true,
@@ -16,18 +16,17 @@
         "use_wandb": true
     },
     "optimizer": {
-        "lr": 0.000002
+        "lr": 0.0002
     },
     "loss": {
-        "gae_lambda": 0.97,
-        "gae_discount": 1.0,
-        "vf_coef": 100.0,
+        "gae_lambda": 0.9997,
+        "gae_discount": 0.9999,
+        "vf_coef": 1.0,
         "pg_clip_high": 0.28,
         "pg_clip_low": 0.2
     },
     "env": {
-        "name": "arithmetic",
-        "max_x": 1000,
-        "max_y": 1000
+        "name": "wordle",
+        "max_guesses": 6
     }
 }

@@ -92,7 +92,7 @@ class Qwen3(nnx.Module):
                 if i == half_layers:
                     value_in = layer.attn_pre_norm(x)
 
-                x, _ = layer(x, positions)
+                x, _ = jax.checkpoint(layer)(x, positions)
 
         x = self.final_norm(x)
         logits = x @ self.embeddings.embedding.T

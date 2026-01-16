@@ -6,6 +6,7 @@ from flax import nnx
 from flax.nnx.filterlib import Filter
 from jax.sharding import Mesh
 
+
 class Checkpointer:
     def __init__(self, directory: str):
         if not directory.startswith("gs://"):
