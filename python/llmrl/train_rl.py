@@ -1,5 +1,7 @@
 import numpy as np
 from flax import nnx
+
+from llmrl.model.value_network import ValueParam
 from llmrl.agent.local import (
     BufferedEpisodeListener,
     LocalAgent,
@@ -11,15 +13,13 @@ from llmrl.env.make import make_env
 from llmrl.experiement import Experiment
 from llmrl.logger import create_logger
 from llmrl.utils.performance import PerformanceTracker
-from rich.console import Console
-
-
 from llmrl.utils.optimizer import make_optimizer
 
+from rich.console import Console
 
 def train_cli(
     config_url: str,
-    restore_id: str | None = None,
+    value_net_id: str | None = None,
 ):
     experiment = Experiment.from_config_file(config_url)
 
@@ -61,10 +61,10 @@ def train_cli(
         config,
     )
 
-    if restore_id is not None:
-        other_exp = Experiment.load(restore_id)
+    if value_net_id is not None:
+        other_exp = Experiment.load(value_net_id)
         with Checkpointer(other_exp.checkpoints_url) as other_checkpointer:
-            trainer.restore_checkpoint(checkpointer=other_checkpointer)
+            trainer.restore_checkpoint(checkpointer=other_checkpointer, wrt=ValueParam)
 
     agent.episode_listener = BufferedEpisodeListener(
         config.eval_envs,

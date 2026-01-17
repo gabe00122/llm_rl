@@ -57,7 +57,7 @@ class Qwen3Layer(nnx.Module):
         self.mlp.load_params(params["mlp"])
 
     def wrap_param_type(self, wrapper):
-        self.attn_pre_norm.scale = wrapper(self.attn_pre_norm.scale)
-        self.attn_post_norm.scale = wrapper(self.attn_post_norm.scale)
+        self.attn_pre_norm.scale = wrapper(self.attn_pre_norm.scale[:])
+        self.attn_post_norm.scale = wrapper(self.attn_post_norm.scale[:])
         self.attn.wrap_param_type(wrapper)
         self.mlp.wrap_param_type(wrapper)

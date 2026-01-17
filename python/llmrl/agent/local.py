@@ -64,19 +64,19 @@ class Trainer(EpisodeListener):
             {"opt": opt, "model": model}, self._update_step, opt.wrt
         )
 
-    def restore_checkpoint(self, *, checkpointer: Checkpointer | None = None):        
+    def restore_checkpoint(self, *, checkpointer: Checkpointer | None = None, wrt: nnx.filterlib.Filter | None = None):        
         opt = nnx.merge(self._opt_def, self._opt_state)
         model = nnx.merge(
             self._model_provider.model_def, self._model_provider.model_state
         )
 
         if checkpointer is None:
-            step = self._checkpointer.restore_latest({"opt": opt, "model": model}, opt.wrt)
+            step = self._checkpointer.restore_latest({"opt": opt, "model": model}, wrt or opt.wrt)
             self._update_step = step
             self._opt_state = nnx.state(opt)
         else:
             checkpointer.restore_latest(
-                {"opt": ocp.PLACEHOLDER, "model": model}, opt.wrt
+                {"opt": ocp.PLACEHOLDER, "model": model}, wrt or opt.wrt
             )
 
         self._model_provider.model_state = nnx.state(model)
@@ -94,7 +94,7 @@ class Trainer(EpisodeListener):
                 self._model_provider.model_state,
                 batch,
                 self._config.loss,
-                jnp.array(self.progress),
+                False,
             )
 
         self._model_provider.model_state = new_model_state

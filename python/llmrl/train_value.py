@@ -1,26 +1,19 @@
+from flax import nnx
+from rich.console import Console
+from pathlib import Path
+
+from llmrl.model.value_network import ValueParam
 from llmrl.update_step import update_step
 from llmrl.buffer import UpdateBuffer
 from llmrl.buffer import UpdateBatch
-
-from jax import numpy as jnp
-from flax import nnx
 from llmrl.base_model_loader import load_base_model
 from llmrl.checkpointer import Checkpointer
 from llmrl.experiement import Experiment
 from llmrl.logger import create_logger
-from rich.console import Console
-import orbax.checkpoint as ocp
-from pathlib import Path
-
-
 from llmrl.utils.optimizer import make_optimizer
 
 
-def train_value_cli(
-    config_url: str,
-    offline_data_url: str,
-    restore_id: str | None = None,
-):
+def train_value_cli(config_url: str, offline_data_url: str):
     experiment = Experiment.from_config_file(config_url)
 
     config = experiment.config
@@ -31,12 +24,6 @@ def train_value_cli(
     model, tokenizer, sampling = load_base_model(config.base_model, rngs)
 
     opt = make_optimizer(model, config, config.total_update_episodes)
-
-    if restore_id is not None:
-        other_exp = Experiment.load(restore_id)
-        with Checkpointer(other_exp.checkpoints_url) as cp:
-            cp.restore_latest({"opt": ocp.PLACEHOLDER, "model": model}, opt.wrt)
-
     opt_def, opt_state = nnx.split(opt)
     model_def, model_state = nnx.split(model)
 
@@ -78,7 +65,7 @@ def train_value_cli(
             model_state,
             batch,
             config.loss,
-            jnp.array(0.0),
+            True,
         )
         metrics["reward"] = batch.rewards.sum(axis=1).mean()
         logger.log_dict(metrics, step)
@@ -87,6 +74,6 @@ def train_value_cli(
     with Checkpointer(experiment.checkpoints_url) as checkpointer:
         opt = nnx.merge(opt_def, opt_state)
         model = nnx.merge(model_def, model_state)
-        checkpointer.save({"opt": opt, "model": model}, step)
+        checkpointer.save({"opt": opt, "model": model}, step, nnx.filterlib.Any(nnx.OptState, ValueParam))
 
     logger.close()

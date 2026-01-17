@@ -16,26 +16,22 @@ app.add_typer(eval_app, name="eval")
 @app.command()
 def train(
     config_url: str,
-    restore_url: Annotated[Optional[str], typer.Option("--restore-url", help="Experiment name or checkpoint directory to restore from")] = None,
-    restore_mode: Annotated[str, typer.Option("--restore-mode", help="Restore mode: 'resume' (same experiment) or 'new' (fresh experiment)")] = "resume",
+    value_net_id: Annotated[Optional[str], typer.Option("--value-net-id", help="Experiment token to start training from")],
 ):
-    train_cli(config_url, restore_url, restore_mode)
+    train_cli(config_url, value_net_id)
 
 
 @app.command()
 def train_value(
     config_url: str,
-    restore_url: Annotated[Optional[str], typer.Option("--restore-url", help="Experiment name or checkpoint directory to restore from")] = None,
-    restore_mode: Annotated[str, typer.Option("--restore-mode", help="Restore mode: 'resume' (same experiment) or 'new' (fresh experiment)")] = "resume",
-    offline_data_url: Annotated[Optional[str], typer.Option("--offline-data-url", help="Path to offline data .npz files (overrides config)")] = None,
+    offline_data_url: str,
 ):
-    train_value_cli(config_url, restore_url, restore_mode, offline_data_url)
+    train_value_cli(config_url, offline_data_url)
 
 
 @app.command()
-def episode_to_jsonl(config_url: str):
-    experiment = Experiment.load(config_url)
-    tokenizer = load_tokenizer(experiment.config.base_model)
+def episode_to_jsonl():
+    tokenizer = load_tokenizer("./base-models/Qwen3-4B-Instruct-2507")
     episode_to_jsonl_fn(
         "./episode_viewer/episodes.jsonl",
         UpdateBatch.load_npz("./episode_viewer/episodes.npz"),

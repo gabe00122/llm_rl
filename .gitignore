@@ -26,3 +26,8 @@ results/
 
 .pytest_cache/
 .ruff_cache/
+
+offline_data/
+
+episode_viewer/episodes.jsonl
+episode_viewer/episodes.npz

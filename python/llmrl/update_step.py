@@ -40,7 +40,7 @@ def loss_fn(
     targets: jax.Array,
     config: LossConfig,
     bounds_mask: jax.Array,
-    progress: jax.Array,
+    value_only: bool,
 ) -> tuple[jax.Array, dict[str, jax.Array]]:
     batch_len, seq_len = rollout.context.shape
 
@@ -56,33 +56,25 @@ def loss_fn(
     value_loss = 0.5 * jnp.square(values[:, :-1] - targets).mean(
         where=bounds_mask[:, :-1]
     )
-    # value_loss = optax.sigmoid_binary_cross_entropy(values[:, :-1], targets).mean(
-    #     where=bounds_mask[:, :-1]
-    # )
-    actor_loss = -(log_prob * advantages).mean(where=policy_mask[:, :-1])
 
-    # pg_ratio = jnp.exp(log_prob - rollout.log_probs)
-    # pg_loss1 = pg_ratio * advantages
-    # pg_loss2 = (
-    #     jnp.clip(pg_ratio, 1.0 - config.pg_clip_low, 1.0 + config.pg_clip_high)
-    #     * advantages
-    # )
-    # actor_loss = -jnp.minimum(pg_loss1, pg_loss2).mean(where=policy_mask[:, :-1])
-
-    # entropy_loss = -0.0001 * policy.entropy().mean(where=policy_mask)
-    loss = config.vf_coef * value_loss  + actor_loss  # + entropy_loss
-
+    loss = config.vf_coef * value_loss
     metrics = {
         "value_loss": value_loss,
         "value": values.mean(where=bounds_mask),
-        "actor_loss": actor_loss,
     }
+
+    if not value_only:
+        log_prob = policy.log_prob(rollout.context[:, 1:])
+        actor_loss: jax.Array = -(log_prob * advantages).mean(where=policy_mask[:, :-1])
+
+        metrics = {**metrics, "actor_loss": actor_loss}
+        loss = loss + actor_loss
 
     return loss, metrics
 
 
 @jax.jit(
-    static_argnames=("opt_def", "model_def", "config"),
+    static_argnames=("opt_def", "model_def", "config", "value_only"),
     donate_argnames=("opt_state", "model_state"),
 )
 def update_step(
@@ -92,7 +84,7 @@ def update_step(
     model_state,
     rollout: UpdateBatch,
     config: LossConfig,
-    progress,
+    value_only: bool,
 ):
     opt = nnx.merge(opt_def, opt_state)
     model = nnx.merge(model_def, model_state)
@@ -114,7 +106,7 @@ def update_step(
     # do the update
     diff = nnx.DiffState(0, opt.wrt)
     grad, metrics = nnx.grad(loss_fn, argnums=diff, has_aux=True)(
-        model, rollout, advantages, targets, config, bounds_mask, progress
+        model, rollout, advantages, targets, config, bounds_mask, value_only
     )
 
     opt.update(model, grad)

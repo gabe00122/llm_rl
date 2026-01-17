@@ -75,7 +75,7 @@ class Qwen3(nnx.Module):
             param_dtype=jnp.bfloat16,
             rngs=rngs,
         )
-        self.final_norm_value.scale = ValueParam(self.final_norm_value.scale)
+        self.final_norm_value.scale = ValueParam(self.final_norm_value.scale[:])
 
         self.value_net = ValueNetwork(value_layer_config.embed, 512, rngs=rngs)
 
