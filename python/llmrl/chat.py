@@ -210,7 +210,7 @@ def generate(
             carry.kv_cache,
         )
         logits = logits.squeeze(-2)  # remove time axis
-        value = nnx.sigmoid(value.squeeze(-1))
+        value = value.squeeze(-1)
 
         sample_key, rng_key = jax.random.split(carry.rng_key)
 

@@ -1,3 +1,4 @@
+from llmrl.train_value import train_value_cli
 from typing import Annotated, Optional
 
 import typer
@@ -15,6 +16,11 @@ app.add_typer(eval_app, name="eval")
 @app.command()
 def train(config_url: str):
     train_cli(config_url)
+
+
+@app.command()
+def train_value(config_url: str):
+    train_value_cli(config_url)
 
 
 @app.command()

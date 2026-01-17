@@ -1,4 +1,5 @@
 from typing import Protocol, override
+import os
 
 import jax
 import numpy as np
@@ -103,11 +104,14 @@ class Trainer(EpisodeListener):
 
 
 class EpisodeSaver(EpisodeListener):
-    def __init__(self, file: str):
-        self._file = file
+    def __init__(self, directory: str):
+        self._directory = directory
+        self.chunk_num = 0
 
     def on_episodes(self, batch: UpdateBatch):
-        batch.save_npz(self._file, compressed=False)
+        file_name = os.path.join(self._directory, f"episodes_{self.chunk_num}.npz")
+        batch.save_npz(file_name, compressed=False)
+        self.chunk_num += 1
 
 
 class MultiEpisodeListener(EpisodeListener):
@@ -131,6 +135,7 @@ class BufferedEpisodeListener(EpisodeListener):
         self._buffer = UpdateBuffer(buffer_size, batch_size, seq_length)
 
     def on_episodes(self, batch: UpdateBatch):
+        print(f"Storing {batch.rewards.shape[0]} episodes")
         self._buffer.store(batch)
         while self._buffer.has_batch:
             self._listener.on_episodes(self._buffer.take_batch())

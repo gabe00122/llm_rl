@@ -28,7 +28,7 @@ def _make_optimizer(model, config: Config) -> nnx.Optimizer:
     )
     return nnx.Optimizer(
         model=model,
-        tx=optax.MultiSteps(optax.adamw(lr, b1=0.9, b2=0.95), every_k_schedule=16),
+        tx=optax.MultiSteps(optax.adamw(lr, b1=0.9, b2=0.95), every_k_schedule=2),
         wrt=nnx.Any(ValueParam, nnx.LoRAParam),
     )
 
@@ -76,12 +76,7 @@ def train_cli(config_url: str):
         config.eval_envs,
         config.update_envs,
         config.max_seq_length,
-        MultiEpisodeListener(
-            [
-                trainer,
-                EpisodeSaver("episode_viewer/episodes.npz"),
-            ]
-        ),
+        trainer,
     )
 
     env_indices = np.arange(eval_batch_size, dtype=np.int32)

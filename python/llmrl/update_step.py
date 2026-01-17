@@ -54,12 +54,12 @@ def loss_fn(
 
     log_prob = policy.log_prob(rollout.context[:, 1:])
 
-    # value_loss = 0.5 * jnp.square(values[:, :-1] - targets).mean(
-    #     where=bounds_mask[:, :-1]
-    # )
-    value_loss = optax.sigmoid_binary_cross_entropy(values[:, :-1], targets).mean(
+    value_loss = 0.5 * jnp.square(values[:, :-1] - targets).mean(
         where=bounds_mask[:, :-1]
     )
+    # value_loss = optax.sigmoid_binary_cross_entropy(values[:, :-1], targets).mean(
+    #     where=bounds_mask[:, :-1]
+    # )
     actor_loss = -(log_prob * advantages).mean(where=policy_mask[:, :-1])
 
     # pg_ratio = jnp.exp(log_prob - rollout.log_probs)
@@ -71,10 +71,11 @@ def loss_fn(
     # actor_loss = -jnp.minimum(pg_loss1, pg_loss2).mean(where=policy_mask[:, :-1])
 
     # entropy_loss = -0.0001 * policy.entropy().mean(where=policy_mask)
-    loss = config.vf_coef * value_loss + actor_loss  # + entropy_loss
+    loss = config.vf_coef * value_loss  + actor_loss  # + entropy_loss
 
     metrics = {
         "value_loss": value_loss,
+        "value": values.mean(where=bounds_mask),
         "actor_loss": actor_loss,
     }
 
@@ -119,7 +120,7 @@ def update_step(
 
     opt.update(model, grad)
 
-    metrics["value"] = values.mean(where=bounds_mask)
+    # metrics["value"] = values.mean(where=bounds_mask)
     metrics["episode_length"] = rollout.kv_cache_lengths.mean()
 
     return nnx.state(opt), nnx.state(model), metrics
