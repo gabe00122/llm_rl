@@ -14,13 +14,22 @@ app.add_typer(eval_app, name="eval")
 
 
 @app.command()
-def train(config_url: str):
-    train_cli(config_url)
+def train(
+    config_url: str,
+    restore_url: Annotated[Optional[str], typer.Option("--restore-url", help="Experiment name or checkpoint directory to restore from")] = None,
+    restore_mode: Annotated[str, typer.Option("--restore-mode", help="Restore mode: 'resume' (same experiment) or 'new' (fresh experiment)")] = "resume",
+):
+    train_cli(config_url, restore_url, restore_mode)
 
 
 @app.command()
-def train_value(config_url: str):
-    train_value_cli(config_url)
+def train_value(
+    config_url: str,
+    restore_url: Annotated[Optional[str], typer.Option("--restore-url", help="Experiment name or checkpoint directory to restore from")] = None,
+    restore_mode: Annotated[str, typer.Option("--restore-mode", help="Restore mode: 'resume' (same experiment) or 'new' (fresh experiment)")] = "resume",
+    offline_data_url: Annotated[Optional[str], typer.Option("--offline-data-url", help="Path to offline data .npz files (overrides config)")] = None,
+):
+    train_value_cli(config_url, restore_url, restore_mode, offline_data_url)
 
 
 @app.command()

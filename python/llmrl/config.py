@@ -71,9 +71,23 @@ class LoggerConfig(BaseModel):
     use_wandb: bool = False
 
 
-class OptimizerConfig(BaseModel):
+class AdamWConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+    type: Literal["adamw"] = "adamw"
     lr: float
+    beta1: float = 0.9
+    beta2: float = 0.999
+    weight_decay: float = 0.01
+
+
+class WarmupCosineConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    type: Literal["warmup_cosine"] = "warmup_cosine"
+    warmup_ratio: float = 0.1
+
+
+OptimizerConfig = AdamWConfig
+ScheduleConfig = WarmupCosineConfig | None
 
 
 class LossConfig(BaseModel):
@@ -92,6 +106,8 @@ class Config(BaseModel):
     lora: LoraConfig
     logger: LoggerConfig
     optimizer: OptimizerConfig
+    schedule: ScheduleConfig = None
+    multi_step: int | None = None
     loss: LossConfig
     env: ArithmeticEnvConfig | WordleEnvConfig = Field(discriminator="name")
 

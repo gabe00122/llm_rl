@@ -17,7 +17,7 @@ class Checkpointer:
         state = nnx.state(model, param_filter)
         self.mngr.save(global_step, args=ocp.args.StandardSave(state))
 
-    def restore[T](self, model: T, step: int, param_filter: Filter = nnx.Param) -> T:
+    def restore(self, model: object, step: int, param_filter: Filter = nnx.Param):
         device = jax.devices()[0]
         mesh = Mesh((device,), ("batch",))
 
@@ -34,10 +34,12 @@ class Checkpointer:
 
         nnx.update(model, restored_state)
 
-        return model
-
-    def restore_latest[T](self, model: T, param_filter: Filter = nnx.Param) -> T:
-        return self.restore(model, self.mngr.latest_step() or 0, param_filter)
+    def restore_latest(self, model: object, param_filter: Filter = nnx.Param) -> int:
+        step = self.mngr.latest_step()
+        if step is None:
+            return 0
+        self.restore(model, step, param_filter)
+        return step
 
     def close(self):
         self.mngr.close()

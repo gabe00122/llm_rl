@@ -3,6 +3,7 @@ import os
 
 import jax
 import numpy as np
+import orbax.checkpoint as ocp
 from flax import nnx
 from jax import numpy as jnp
 from llmrl.agent.base import Agent
@@ -63,15 +64,21 @@ class Trainer(EpisodeListener):
             {"opt": opt, "model": model}, self._update_step, opt.wrt
         )
 
-    def restore_checkpoint(self):
-        # todo we need to restore the step as well
+    def restore_checkpoint(self, *, checkpointer: Checkpointer | None = None):        
         opt = nnx.merge(self._opt_def, self._opt_state)
         model = nnx.merge(
             self._model_provider.model_def, self._model_provider.model_state
         )
-        self._checkpointer.restore_latest({"opt": opt, "model": model}, opt.wrt)
 
-        self._opt_state = nnx.state(opt)
+        if checkpointer is None:
+            step = self._checkpointer.restore_latest({"opt": opt, "model": model}, opt.wrt)
+            self._update_step = step
+            self._opt_state = nnx.state(opt)
+        else:
+            checkpointer.restore_latest(
+                {"opt": ocp.PLACEHOLDER, "model": model}, opt.wrt
+            )
+
         self._model_provider.model_state = nnx.state(model)
 
     @property

@@ -1,6 +1,5 @@
 import distrax
 import jax
-import optax
 from flax import nnx
 from jax import numpy as jnp
 from llmrl.buffer import UpdateBatch

@@ -1,40 +1,28 @@
 import numpy as np
-import optax
 from flax import nnx
 from llmrl.agent.local import (
     BufferedEpisodeListener,
-    EpisodeSaver,
     LocalAgent,
-    MultiEpisodeListener,
     Trainer,
 )
 from llmrl.base_model_loader import load_base_model
 from llmrl.checkpointer import Checkpointer
-from llmrl.config import Config
 from llmrl.env.make import make_env
 from llmrl.experiement import Experiment
 from llmrl.logger import create_logger
-from llmrl.model.value_network import ValueParam
 from llmrl.utils.performance import PerformanceTracker
 from rich.console import Console
 
 
-def _make_optimizer(model, config: Config) -> nnx.Optimizer:
-    lr = optax.warmup_cosine_decay_schedule(
-        0,
-        config.optimizer.lr,
-        config.total_update_episodes // 10,
-        config.total_update_episodes,
-    )
-    return nnx.Optimizer(
-        model=model,
-        tx=optax.MultiSteps(optax.adamw(lr, b1=0.9, b2=0.95), every_k_schedule=2),
-        wrt=nnx.Any(ValueParam, nnx.LoRAParam),
-    )
+from llmrl.utils.optimizer import make_optimizer
 
 
-def train_cli(config_url: str):
+def train_cli(
+    config_url: str,
+    restore_id: str | None = None,
+):
     experiment = Experiment.from_config_file(config_url)
+
     config = experiment.config
     console = Console()
     performance_tracker = PerformanceTracker()
@@ -51,7 +39,7 @@ def train_cli(config_url: str):
         config.env.name, eval_batch_size, experiment.environments_seed, config.env
     )
 
-    opt = _make_optimizer(model, config)
+    opt = make_optimizer(model, config, config.total_update_episodes)
 
     agent = LocalAgent(
         model,
@@ -72,6 +60,12 @@ def train_cli(config_url: str):
         logger,
         config,
     )
+
+    if restore_id is not None:
+        other_exp = Experiment.load(restore_id)
+        with Checkpointer(other_exp.checkpoints_url) as other_checkpointer:
+            trainer.restore_checkpoint(checkpointer=other_checkpointer)
+
     agent.episode_listener = BufferedEpisodeListener(
         config.eval_envs,
         config.update_envs,
