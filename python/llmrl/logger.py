@@ -78,12 +78,13 @@ class ConsoleLogger(BaseLogger):
     def log_dict(self, data: Metrics, step: int) -> None:
         data = json_normalize(data, sep=".")
 
-        keys = data.keys()
+        keys = sorted(data.keys())
         values = []
-        for value in data.values():
+        for key in keys:
+            value = data[key]
             if hasattr(value, "item"):
                  value = value.item()
-            values.append(f"{value:.3f}" if isinstance(value, float) else value)
+            values.append(f"{value:.6f}" if isinstance(value, float) else value)
 
         log_str = "\n".join([f"{key}: {value}" for key, value in zip(keys, values)])
         log_str = f"step: {step}\n{log_str}"

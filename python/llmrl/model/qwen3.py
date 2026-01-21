@@ -12,6 +12,21 @@ from llmrl.model.util import load_param
 from llmrl.model.value_network import ValueNetwork
 
 
+def wrap_param(node: nnx.Module, param):
+    for path, value in nnx.iter_graph(node):
+        if isinstance(value, nnx.Param):
+            *path, key = path
+            
+            target = node
+            for p in path:
+                if isinstance(p, int):
+                    target = target[p]
+                else:
+                    target = getattr(target, p)
+            
+            setattr(target, key, param(value[...]))
+
+
 class Qwen3(nnx.Module):
     def __init__(
         self,
@@ -54,7 +69,6 @@ class Qwen3(nnx.Module):
                 config=value_layer_config,
                 rngs=rngs,
             )
-            value_layer.wrap_param_type(ValueParam)
             value_layers.append(value_layer)
 
         self.layers = nnx.List(layers)
@@ -75,9 +89,11 @@ class Qwen3(nnx.Module):
             param_dtype=jnp.bfloat16,
             rngs=rngs,
         )
-        self.final_norm_value.scale = ValueParam(self.final_norm_value.scale[:])
-
         self.value_net = ValueNetwork(value_layer_config.embed, 512, rngs=rngs)
+
+        wrap_param(self.value_layers, ValueParam)
+        wrap_param(self.final_norm_value, ValueParam)
+        wrap_param(self.value_net, ValueParam)
 
     def initialize_lora(self, lora_config: LoraConfig, *, rngs: nnx.Rngs):
         for layer in self.layers:
@@ -111,8 +127,9 @@ class Qwen3(nnx.Module):
             out_carry = []
             for i, (layer, value_layer, (layer_carry_in, value_carry_in)) in enumerate(zip(self.layers, self.value_layers, carry)):
                 value_x, value_carry_out = value_layer(value_x, positions, value_carry_in)
-
                 x, layer_carry_out = layer(x, positions, layer_carry_in)
+
+                # value_x = value_x + jax.lax.stop_gradient(x[:, :, :256])
                 out_carry.append((layer_carry_out, value_carry_out))
 
             carry = tuple(out_carry)

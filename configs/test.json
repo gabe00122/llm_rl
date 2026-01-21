@@ -1,27 +1,32 @@
 {
     "seed": "random",
     "base_model": "Qwen/Qwen3-4B-Instruct-2507",
-    "eval_envs": 8,
-    "update_envs": 2,
+    "eval_envs": 16,
+    "update_envs": 1,
     "max_seq_length": 4096,
-    "total_update_episodes": 16000,
-    "checkpoint_every": 500,
+    "total_update_episodes": 10000,
+    "checkpoint_every": 160,
+    "multi_step": 4,
     "lora": {
         "mlp": true,
-        "attn": true,
+        "attn": false,
         "rank": 32
     },
     "logger": {
         "use_console": true,
         "use_wandb": true
     },
+    "schedule": {
+        "type": "warmup_cosine",
+        "warmup_ratio": 0.1
+    },
     "optimizer": {
-        "lr": 0.0002
+        "lr": 0.00002
     },
     "loss": {
-        "gae_lambda": 1.0,
-        "gae_discount": 1.0,
-        "vf_coef": 1.0,
+        "gae_lambda": 0.9968,
+        "gae_discount": 0.99937,
+        "vf_coef": 10.0,
         "pg_clip_high": 0.28,
         "pg_clip_low": 0.2
     },

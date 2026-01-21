@@ -50,6 +50,9 @@ class GenerationState(NamedTuple):
     log_probs: jax.Array
     values: jax.Array
 
+    # metrics
+    tokens_processed: jax.Array
+
 
 def encode_input(
     tokenizer: PreTrainedTokenizerFast,
@@ -70,9 +73,9 @@ def decode_responses(
     (indices,) = np.where(gen.turn_finished)
     indices = indices.astype(np.int32)
 
-    context = np.array(gen.context)
-    turn_start_positions = np.array(gen.turn_start_positions)
-    context_length = np.array(gen.context_length)
+    context = np.asarray(gen.context)
+    turn_start_positions = np.asarray(gen.turn_start_positions)
+    context_length = np.asarray(gen.context_length)
 
     output = [
         tokenizer.decode(context[b, turn_start_positions[b] : context_length[b] - 1])
@@ -116,6 +119,7 @@ def create_generation_state(
         log_probs=jnp.zeros((batch_size, seq_len - 1), jnp.float32),
         values=jnp.zeros((batch_size, seq_len), jnp.float32),
         rng_key=rng_key,
+        tokens_processed=jnp.zeros((), dtype=jnp.int32),
     )
 
 
@@ -151,10 +155,9 @@ def append_prompt_tokens(
 
     return state._replace(
         context=context,
-        # prompt_mask=prompt_mask,
-        turn_start_positions=jnp.array(turn_start_positions),
-        context_length=jnp.array(turn_start_positions),
-        turn_finished=jnp.array(turn_finished),
+        turn_start_positions=turn_start_positions,
+        context_length=turn_start_positions,
+        turn_finished=turn_finished,
     )
 
 
@@ -248,6 +251,8 @@ def generate(
             carry.policy_mask, carry.kv_cache_length, use_sample, ~turn_finished
         )
 
+        tokens_processed = carry.tokens_processed + jnp.sum(~turn_finished)
+
         turn_finished = turn_finished | ((in_tokens == EOS_1) & over_start_position)
 
         return carry._replace(
@@ -260,6 +265,7 @@ def generate(
             values=values,
             policy_mask=policy_mask,
             rng_key=rng_key,
+            tokens_processed=tokens_processed,
         )
 
     return nnx.while_loop(cond, body, gen)

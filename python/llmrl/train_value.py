@@ -23,7 +23,7 @@ def train_value_cli(config_url: str, offline_data_url: str):
     rngs = nnx.Rngs(experiment.params_seed)
     model, tokenizer, sampling = load_base_model(config.base_model, rngs)
 
-    opt = make_optimizer(model, config, config.total_update_episodes)
+    opt = make_optimizer(model, config, (100 * 100) // config.update_envs) # this shouldn't be hardcoded
     opt_def, opt_state = nnx.split(opt)
     model_def, model_state = nnx.split(model)
 
@@ -74,6 +74,6 @@ def train_value_cli(config_url: str, offline_data_url: str):
     with Checkpointer(experiment.checkpoints_url) as checkpointer:
         opt = nnx.merge(opt_def, opt_state)
         model = nnx.merge(model_def, model_state)
-        checkpointer.save({"opt": opt, "model": model}, step, nnx.filterlib.Any(nnx.OptState, ValueParam))
+        checkpointer.save(model, step, ValueParam)
 
     logger.close()

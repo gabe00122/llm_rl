@@ -53,6 +53,14 @@ def loss_fn(
 
     log_prob = policy.log_prob(rollout.context[:, 1:])
 
+    # temp
+    if value_only:
+        # use fresh values for the target
+        _, targets = calculate_advantages(
+            jnp.asarray(rollout.rewards), jax.lax.stop_gradient(values), config.gae_discount, config.gae_lambda
+        )
+    # temp
+
     value_loss = 0.5 * jnp.square(values[:, :-1] - targets).mean(
         where=bounds_mask[:, :-1]
     )
@@ -65,7 +73,14 @@ def loss_fn(
 
     if not value_only:
         log_prob = policy.log_prob(rollout.context[:, 1:])
-        actor_loss: jax.Array = -(log_prob * advantages).mean(where=policy_mask[:, :-1])
+        # actor_loss: jax.Array = -(log_prob * advantages).mean(where=policy_mask[:, :-1])
+        pg_ratio = jnp.exp(log_prob - rollout.log_probs)
+        pg_loss1 = pg_ratio * advantages
+        pg_loss2 = (
+            jnp.clip(pg_ratio, 1.0 - config.pg_clip_low, 1.0 + config.pg_clip_high)
+            * advantages
+        )
+        actor_loss = -jnp.minimum(pg_loss1, pg_loss2).mean(where=policy_mask[:, :-1])
 
         metrics = {**metrics, "actor_loss": actor_loss}
         loss = loss + actor_loss

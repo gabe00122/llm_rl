@@ -16,7 +16,7 @@ app.add_typer(eval_app, name="eval")
 @app.command()
 def train(
     config_url: str,
-    value_net_id: Annotated[Optional[str], typer.Option("--value-net-id", help="Experiment token to start training from")],
+    value_net_id: Annotated[Optional[str], typer.Option("--value-net-id", help="Experiment token to start training from")] = None,
 ):
     train_cli(config_url, value_net_id)
 
@@ -31,7 +31,7 @@ def train_value(
 
 @app.command()
 def episode_to_jsonl():
-    tokenizer = load_tokenizer("./base-models/Qwen3-4B-Instruct-2507")
+    tokenizer = load_tokenizer("./base-models/Qwen/Qwen3-4B-Instruct-2507")
     episode_to_jsonl_fn(
         "./episode_viewer/episodes.jsonl",
         UpdateBatch.load_npz("./episode_viewer/episodes.npz"),

@@ -173,14 +173,6 @@ class AttentionLayer(nnx.Module):
 
         return out, carry
 
-    def wrap_param_type(self, wrapper):
-        self.key_proj.kernel = wrapper(self.key_proj.kernel[:])
-        self.value_proj.kernel = wrapper(self.value_proj.kernel[:])
-        self.query_proj.kernel = wrapper(self.query_proj.kernel[:])
-        self.out.kernel = wrapper(self.out.kernel[:])
-        self.key_norm.scale = wrapper(self.key_norm.scale[:])
-        self.query_norm.scale = wrapper(self.query_norm.scale[:])
-
     def load_params(self, params):
         k_proj = params["k_proj"]["weight"].T.reshape(self.key_proj.kernel.shape)
         q_proj = params["q_proj"]["weight"].T.reshape(self.query_proj.kernel.shape)

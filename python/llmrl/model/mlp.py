@@ -70,11 +70,6 @@ class MlpLayer(nnx.Module):
             rngs=rngs,
         )
 
-    def wrap_param_type(self, wrapper):
-        self.up_gate.kernel = wrapper(self.up_gate.kernel[:])
-        self.up_proj.kernel = wrapper(self.up_proj.kernel[:])
-        self.down_proj.kernel = wrapper(self.down_proj.kernel[:])
-
     def load_params(self, params):
         # pass in the mlp dict
         load_param(self.up_gate.kernel, params["gate_proj"]["weight"].T)

@@ -15,13 +15,19 @@
         "use_console": true,
         "use_wandb": true
     },
+    "schedule": {
+        "type": "warmup_cosine",
+        "warmup_ratio": 0.1
+    },
     "optimizer": {
         "type": "adamw",
-        "lr": 0.00002
+        "lr": 0.0002,
+        "beta1": 0.9,
+        "beta2": 0.95
     },
     "loss": {
-        "gae_lambda": 1.0,
-        "gae_discount": 1.0,
+        "gae_lambda": 0.9968,
+        "gae_discount": 0.99937,
         "vf_coef": 1.0,
         "pg_clip_high": 0.28,
         "pg_clip_low": 0.2

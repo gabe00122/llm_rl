@@ -1,3 +1,6 @@
+from llmrl.model.value_network import ValueParam
+from typing import NamedTuple
+import time
 from typing import Protocol, override
 import os
 
@@ -61,7 +64,7 @@ class Trainer(EpisodeListener):
             self._model_provider.model_def, self._model_provider.model_state
         )
         self._checkpointer.save(
-            {"opt": opt, "model": model}, self._update_step, opt.wrt
+            {"opt": opt, "model": model}, self._update_step, opt.wrt # I need to make sure nnx.OptimizerState is also saved
         )
 
     def restore_checkpoint(self, *, checkpointer: Checkpointer | None = None, wrt: nnx.filterlib.Filter | None = None):        
@@ -70,14 +73,14 @@ class Trainer(EpisodeListener):
             self._model_provider.model_def, self._model_provider.model_state
         )
 
+        restore_filter = nnx.filterlib.Any(nnx.OptState, wrt or opt.wrt)
+
         if checkpointer is None:
-            step = self._checkpointer.restore_latest({"opt": opt, "model": model}, wrt or opt.wrt)
+            step = self._checkpointer.restore_latest({"opt": opt, "model": model}, restore_filter)
             self._update_step = step
             self._opt_state = nnx.state(opt)
         else:
-            checkpointer.restore_latest(
-                {"opt": ocp.PLACEHOLDER, "model": model}, wrt or opt.wrt
-            )
+            checkpointer.restore_latest(model, ValueParam)
 
         self._model_provider.model_state = nnx.state(model)
 
@@ -105,6 +108,8 @@ class Trainer(EpisodeListener):
 
         self._logger.log_dict(metrics, self._update_step)
         self._update_step += 1
+
+        batch.save_npz("./episode_viewer/episodes.npz")
 
         if self._update_step % self._config.checkpoint_every == 0:
             self.save_checkpoint()
@@ -148,6 +153,30 @@ class BufferedEpisodeListener(EpisodeListener):
             self._listener.on_episodes(self._buffer.take_batch())
 
 
+class NpGenData(NamedTuple):
+    kv_cache_length: jax.typing.ArrayLike
+    context: jax.typing.ArrayLike
+    log_probs: jax.typing.ArrayLike
+    values: jax.typing.ArrayLike
+    policy_mask: jax.typing.ArrayLike
+    context_length: jax.typing.ArrayLike
+    turn_start_positions: jax.typing.ArrayLike
+    turn_finished: jax.typing.ArrayLike
+
+
+def get_np_gen_data(gen: GenerationState) -> NpGenData:
+    data = NpGenData(
+        gen.kv_cache_length,
+        gen.context,
+        gen.log_probs,
+        gen.values,
+        gen.policy_mask,
+        gen.context_length,
+        gen.turn_start_positions,
+        gen.turn_finished
+    )
+    return jax.device_get(data)
+
 class LocalAgent(Agent, ModelProvider):
     def __init__(
         self,
@@ -173,10 +202,14 @@ class LocalAgent(Agent, ModelProvider):
         self._gen = create_generation_state(
             kv_cache, self._config.eval_envs, self._config.max_seq_length, self._rng_key
         )
+        self._np_gen = get_np_gen_data(self._gen)
 
         self._rewards = np.zeros(
             (self._config.eval_envs, self._config.max_seq_length), dtype=np.float32
         )
+
+        self._last_tokens = 0
+        self._last_tps_time = 0.0
 
     def set_episode_instructions(self, instructions: str):
         instruction_tokens = encode_input(
@@ -195,6 +228,22 @@ class LocalAgent(Agent, ModelProvider):
         self._gen = self._gen._replace(
             env_instruction_length=self._gen.context_length.copy(),
         )
+        self._np_gen = get_np_gen_data(self._gen)
+
+    def _report_tps(self):
+        current_tps_time = time.perf_counter()
+        time_delta = current_tps_time - self._last_tps_time
+
+        if time_delta > 60.0:
+            current_tokens = self._gen.tokens_processed.item()
+
+            token_delta = current_tokens - self._last_tokens
+
+            self._last_tps_time = current_tps_time
+            self._last_tokens = current_tokens
+
+            tps = token_delta / time_delta
+            print(f"TPS: {tps:.2f}")
 
     @override
     def reset(self) -> None:
@@ -208,7 +257,7 @@ class LocalAgent(Agent, ModelProvider):
         rewards: np.ndarray,
         dones: np.ndarray,
     ) -> tuple[np.ndarray, list[str]]:
-        kv_cache_lengths = np.array(self._gen.kv_cache_length)
+        kv_cache_lengths = self._np_gen.kv_cache_length
         self._rewards[batch_indices, kv_cache_lengths[batch_indices]] = rewards
 
         done_idx = batch_indices[np.where(dones)]
@@ -217,12 +266,12 @@ class LocalAgent(Agent, ModelProvider):
             if self.episode_listener is not None:
                 self.episode_listener.on_episodes(
                     UpdateBatch(
-                        np.array(self._gen.context)[done_idx],
+                        self._np_gen.context[done_idx],
                         kv_cache_lengths[done_idx],
-                        np.array(self._gen.log_probs)[done_idx],
-                        np.array(self._gen.values)[done_idx],
+                        self._np_gen.log_probs[done_idx],
+                        self._np_gen.values[done_idx],
                         self._rewards[done_idx],
-                        np.array(self._gen.policy_mask)[done_idx],
+                        self._np_gen.policy_mask[done_idx],
                     )
                 )
 
@@ -233,6 +282,10 @@ class LocalAgent(Agent, ModelProvider):
                 self._rewards[done_idx] = 0.0
 
         with self._performance_tracker.time("encode"):
+            # context = np.array(state.context)
+            # context_length = np.array(state.context_length)
+            # turn_start_positions = np.array(state.turn_start_positions)
+            # turn_finished = np.array(state.turn_finished)
             self._gen = append_user_prompts(
                 self._gen, batch_indices, self._tokenizer, obs
             )
@@ -241,8 +294,14 @@ class LocalAgent(Agent, ModelProvider):
             self._gen = generate(
                 self.model_def, self.model_state, "simple", self._gen, 1
             )
+            self._np_gen = get_np_gen_data(self._gen)
 
         with self._performance_tracker.time("decode"):
-            response_indices, response = decode_responses(self._tokenizer, self._gen)
+            # context = np.array(gen.context)
+            # turn_start_positions = np.array(gen.turn_start_positions)
+            # context_length = np.array(gen.context_length)
+            response_indices, response = decode_responses(self._tokenizer, self._np_gen)
+
+        self._report_tps()
 
         return response_indices, response
