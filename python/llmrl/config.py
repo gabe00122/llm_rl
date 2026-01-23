@@ -71,6 +71,11 @@ class LoggerConfig(BaseModel):
     use_wandb: bool = False
 
 
+class SGDConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    type: Literal["sgd"] = "sgd"
+    lr: float
+
 class AdamWConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     type: Literal["adamw"] = "adamw"
@@ -86,7 +91,7 @@ class WarmupCosineConfig(BaseModel):
     warmup_ratio: float = 0.1
 
 
-OptimizerConfig = AdamWConfig
+OptimizerConfig = AdamWConfig | SGDConfig
 ScheduleConfig = WarmupCosineConfig | None
 
 

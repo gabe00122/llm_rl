@@ -84,6 +84,14 @@ def loss_fn(
 
         metrics = {**metrics, "actor_loss": actor_loss}
         loss = loss + actor_loss
+    else:
+        _, true_targets = calculate_advantages(
+            jnp.asarray(rollout.rewards), jax.lax.stop_gradient(values), config.gae_discount, 1.0
+        )
+        true_value_loss = 0.5 * jnp.square(values[:, :-1] - true_targets).mean(
+            where=bounds_mask[:, :-1]
+        )
+        metrics = {**metrics, "true_value_loss": true_value_loss}
 
     return loss, metrics
 

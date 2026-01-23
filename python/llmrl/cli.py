@@ -7,6 +7,7 @@ from llmrl.experiement import Experiment
 from llmrl.train_rl import train_cli
 from llmrl.util import load_tokenizer
 from llmrl.utils.episode_to_jsonl import episode_to_jsonl as episode_to_jsonl_fn
+from llmrl.build_offline import build_offline as build_offline_fn
 
 app = typer.Typer(pretty_exceptions_show_locals=False)
 eval_app = typer.Typer(help="Evaluate agents against environments")
@@ -28,6 +29,9 @@ def train_value(
 ):
     train_value_cli(config_url, offline_data_url)
 
+@app.command()
+def build_offline(config_url: str, output_path: str, file_size: int, file_count: int):
+    build_offline_fn(config_url, output_path, file_size, file_count)
 
 @app.command()
 def episode_to_jsonl():

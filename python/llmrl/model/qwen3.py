@@ -1,5 +1,4 @@
 from llmrl.model.value_network import ValueParam
-from transformers import Qwen3Config
 from typing import Any
 
 import jax
@@ -26,6 +25,19 @@ def wrap_param(node: nnx.Module, param):
             
             setattr(target, key, param(value[...]))
 
+class ValueLayer(nnx.Module):
+    def __init__(self, config: LLMConfig, in_latent: int, *, rngs: nnx.Rngs):
+        self.layer = Qwen3Layer(config=config, rngs=rngs)
+        self.in_norm = nnx.RMSNorm(in_latent, rngs=rngs)
+        self.in_proj = nnx.Linear(in_latent, 32, rngs=rngs)
+        self.in_up_proj = nnx.Linear(32, config.embed, rngs=rngs)
+
+    def initialize_carry(self, batch_size: int, seq_length: int):
+        return self.layer.initialize_carry(batch_size, seq_length)
+
+    def __call__(self, latent: jax.Array, value_latent: jax.Array, positions: jax.Array, carry: KVCache | None = None):
+        in_latents = self.in_up_proj(nnx.silu(self.in_proj(self.in_norm(jax.lax.stop_gradient(latent)))))
+        return self.layer(value_latent + in_latents, positions, carry)
 
 class Qwen3(nnx.Module):
     def __init__(
@@ -41,7 +53,7 @@ class Qwen3(nnx.Module):
         value_layer_config = config.model_copy(
             update={
                 "embed": 256,
-                "mlp_ffw_size": 256 * 2,
+                "mlp_ffw_size": 256*2,
                 "head_dim": 32,
                 "q_heads": 8,
                 "kv_heads": 8,
@@ -65,8 +77,9 @@ class Qwen3(nnx.Module):
                     rngs=rngs,
                 )
             )
-            value_layer = Qwen3Layer(
+            value_layer = ValueLayer(
                 config=value_layer_config,
+                in_latent=config.embed,
                 rngs=rngs,
             )
             value_layers.append(value_layer)
@@ -126,18 +139,16 @@ class Qwen3(nnx.Module):
         if carry is not None:
             out_carry = []
             for i, (layer, value_layer, (layer_carry_in, value_carry_in)) in enumerate(zip(self.layers, self.value_layers, carry)):
-                value_x, value_carry_out = value_layer(value_x, positions, value_carry_in)
                 x, layer_carry_out = layer(x, positions, layer_carry_in)
+                value_x, value_carry_out = value_layer(x, value_x, positions, value_carry_in)
 
-                # value_x = value_x + jax.lax.stop_gradient(x[:, :, :256])
                 out_carry.append((layer_carry_out, value_carry_out))
 
             carry = tuple(out_carry)
         else:
             for i, (layer, value_layer) in enumerate(zip(self.layers, self.value_layers)):
-                value_x, _ = value_layer(value_x, positions)
-
                 x, _ = jax.checkpoint(layer)(x, positions)
+                value_x, _ = jax.checkpoint(value_layer)(x, value_x, positions)
 
         x = self.final_norm(x)
         value_x = self.final_norm_value(value_x)

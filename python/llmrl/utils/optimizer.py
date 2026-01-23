@@ -1,3 +1,4 @@
+from llmrl.config import SGDConfig
 import optax
 from flax import nnx
 from llmrl.config import Config, WarmupCosineConfig, AdamWConfig
@@ -26,7 +27,11 @@ def make_optimizer(model: nnx.Module, config: Config, total_steps: int) -> nnx.O
     else:
         raise ValueError(f"Unsupported schedule type: {type(config.schedule)}")
 
-    if isinstance(config.optimizer, AdamWConfig):
+    if isinstance(config.optimizer, SGDConfig):
+        tx = optax.sgd(
+            learning_rate=tx_lr,
+        )
+    elif isinstance(config.optimizer, AdamWConfig):
         tx = optax.adamw(
             learning_rate=tx_lr,
             b1=config.optimizer.beta1,
