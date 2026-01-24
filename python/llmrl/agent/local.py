@@ -67,7 +67,7 @@ class Trainer(EpisodeListener):
             {"opt": opt, "model": model}, self._update_step, opt.wrt # I need to make sure nnx.OptimizerState is also saved
         )
 
-    def restore_checkpoint(self, *, checkpointer: Checkpointer | None = None, wrt: nnx.filterlib.Filter | None = None):        
+    def restore_checkpoint(self, *, checkpointer: Checkpointer | None = None, wrt: nnx.filterlib.Filter | None = None):
         opt = nnx.merge(self._opt_def, self._opt_state)
         model = nnx.merge(
             self._model_provider.model_def, self._model_provider.model_state
@@ -175,7 +175,7 @@ def get_np_gen_data(gen: GenerationState) -> NpGenData:
         gen.turn_start_positions,
         gen.turn_finished
     )
-    return jax.device_get(data)
+    return jax.tree.map(lambda x: np.array(x), jax.device_get(data))
 
 class LocalAgent(Agent, ModelProvider):
     def __init__(
@@ -220,12 +220,13 @@ class LocalAgent(Agent, ModelProvider):
             ],
             False,
         )
-        self._gen = append_prompt_tokens(
-            self._gen,
+        append_prompt_tokens(
+            self._np_gen,
             np.arange(self._config.eval_envs, dtype=np.int32),
             instruction_tokens,
         )
-        self._gen = self._gen._replace(
+        self._env_instruction_length = np.array(self._gen.context_length)
+        self._gen = self._gen._replace( # this can probably go away now
             env_instruction_length=self._gen.context_length.copy(),
         )
         self._np_gen = get_np_gen_data(self._gen)
@@ -276,9 +277,11 @@ class LocalAgent(Agent, ModelProvider):
                 )
 
             with self._performance_tracker.time("reset"):
-                done_mask = np.zeros((self._config.eval_envs,), np.bool_)
-                done_mask[batch_indices] = dones
-                self._gen: GenerationState = reset_episodes(self._gen, done_mask)
+                # done_mask = np.zeros((self._config.eval_envs,), np.bool_)
+                # done_mask[batch_indices] = dones
+                # self._gen: GenerationState = reset_episodes(self._gen, done_mask)
+                self._np_gen.context_length[done_idx] = self._env_instruction_length[done_idx]
+                self._np_gen.kv_cache_length[done_idx] = 0
                 self._rewards[done_idx] = 0.0
 
         with self._performance_tracker.time("encode"):
@@ -286,13 +289,23 @@ class LocalAgent(Agent, ModelProvider):
             # context_length = np.array(state.context_length)
             # turn_start_positions = np.array(state.turn_start_positions)
             # turn_finished = np.array(state.turn_finished)
-            self._gen = append_user_prompts(
-                self._gen, batch_indices, self._tokenizer, obs
+            append_user_prompts(
+                self._np_gen, batch_indices, self._tokenizer, obs
+            )
+            context, kv_cache_length, context_length, turn_start_positions = jax.device_put(
+                (self._np_gen.context, self._np_gen.kv_cache_length, self._np_gen.context_length, self._np_gen.turn_start_positions)
+            )
+            self._gen = self._gen._replace(
+                context=context,
+                turn_start_positions=turn_start_positions,
+                context_length=context_length,
+                kv_cache_length=kv_cache_length,
+                turn_finished=jnp.zeros_like(self._gen.turn_finished),
             )
 
         with self._performance_tracker.time("generate"):
             self._gen = generate(
-                self.model_def, self.model_state, "simple", self._gen, 1
+                self.model_def, self.model_state, "simple", self._gen, 4
             )
             self._np_gen = get_np_gen_data(self._gen)
 

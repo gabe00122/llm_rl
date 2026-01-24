@@ -81,7 +81,6 @@ def train_value_cli(config_url: str, offline_data_url: str):
             batch,
             config.loss,
             True,
-            jnp.array(step / total_updates)
         )
         values = calculate_values(model_def, model_state, ref_context)
         output_values[step] = np.array(values)
@@ -89,12 +88,12 @@ def train_value_cli(config_url: str, offline_data_url: str):
         metrics["reward"] = batch.rewards.sum(axis=1).mean()
         logger.log_dict(metrics, step)
         step += 1
+    
+    np.save("./values", output_values)
 
     with Checkpointer(experiment.checkpoints_url) as checkpointer:
         opt = nnx.merge(opt_def, opt_state)
         model = nnx.merge(model_def, model_state)
-        checkpointer.save(model, step, ValueParam)
+        checkpointer.save({"opt": opt, "model": model}, step, ValueParam)
 
     logger.close()
-
-    np.save("./values", output_values)

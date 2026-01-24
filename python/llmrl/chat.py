@@ -19,6 +19,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from transformers import PreTrainedTokenizerFast
 
+# these should come from the tokenizer
 PAD_ID = 151643
 EOS_1 = 151645
 EOS_2 = 151643
@@ -130,39 +131,24 @@ def reset_generation_state(state: GenerationState) -> GenerationState:
     )
 
 
-def append_prompt_tokens(
-    state: GenerationState, batch_indices: np.ndarray, prompts: list[np.ndarray]
-) -> GenerationState:
-    context = np.array(state.context)
-    # prompt_mask = state.prompt_mask
-    context_length = np.array(state.context_length)
-    turn_start_positions = np.array(state.turn_start_positions)
-    turn_finished = np.array(state.turn_finished)
-    turn_finished[batch_indices] = False
-    # todo: could be more efficient
-
+# state should be NpGenData
+def append_prompt_tokens(state, batch_indices: np.ndarray, prompts: list[np.ndarray]):
     for i, prompt in zip(batch_indices, prompts):
-        start = context_length[i].item()
+        start = state.context_length[i].item()
         end = start + prompt.shape[0]
-        safe_end = min(end, context.shape[1])
+        safe_end = min(end, state.context.shape[1])
         if safe_end < end:
             delta = end - safe_end
             prompt = prompt[:-delta]
 
-        context[i, start:safe_end] = prompt
+        state.context[i, start:safe_end] = prompt
 
-        turn_start_positions[i] = safe_end
+        state.turn_start_positions[i] = safe_end
+        state.context_length[i] = safe_end
 
-    return state._replace(
-        context=context,
-        turn_start_positions=turn_start_positions,
-        context_length=turn_start_positions,
-        turn_finished=turn_finished,
-    )
-
-
+# state should be NpGenData
 def append_user_prompts(
-    state: GenerationState,
+    state,
     batch_indices: np.ndarray,
     tokenizer: PreTrainedTokenizerFast,
     prompts: list[str],
@@ -170,7 +156,7 @@ def append_user_prompts(
     conversation_turns = [[{"role": "user", "content": content}] for content in prompts]
     prompt_tokens = encode_input(tokenizer, conversation_turns)
 
-    return append_prompt_tokens(state, batch_indices, prompt_tokens)
+    append_prompt_tokens(state, batch_indices, prompt_tokens)
 
 
 @jax.jit(donate_argnums=(0,))
@@ -187,7 +173,7 @@ def reset_episodes(state: GenerationState, done_mask: jax.Array) -> GenerationSt
 
 
 @jax.jit(
-    static_argnames=("model_def", "sampling", "wait_for"), donate_argnames=("gen",)
+    static_argnames=("model_def", "sampling", "wait_for", "calculate_value"), donate_argnames=("gen",)
 )
 def generate(
     model_def,
