@@ -99,8 +99,13 @@ class WarmupCosineConfig(BaseModel):
     warmup_ratio: float = 0.1
 
 
-OptimizerConfig = AdamWConfig | SGDConfig
 ScheduleConfig = WarmupCosineConfig | None
+
+class OptimizerConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    opt: AdamWConfig | SGDConfig = Field(discriminator="type")
+    schedule: ScheduleConfig = None
+    multi_step: int | None = None
 
 
 class LossConfig(BaseModel):
@@ -118,9 +123,8 @@ class Config(BaseModel):
     base_model: str
     lora: LoraConfig
     logger: LoggerConfig
-    optimizer: OptimizerConfig
-    schedule: ScheduleConfig = None
-    multi_step: int | None = None
+    policy_optimizer: OptimizerConfig
+    value_optimizer: OptimizerConfig
     loss: LossConfig
     env: ArithmeticEnvConfig | WordleEnvConfig = Field(discriminator="name")
 

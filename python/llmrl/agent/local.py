@@ -44,14 +44,16 @@ class Trainer(EpisodeListener):
     def __init__(
         self,
         model_provider: ModelProvider,
-        optimizer: nnx.Optimizer,
+        policy_opt: nnx.Optimizer,
+        value_opt: nnx.Optimizer,
         checkpointer: Checkpointer,
         performance: PerformanceTracker,
         logger: BaseLogger,
         config: Config,
     ):
         self._model_provider = model_provider
-        self._opt_def, self._opt_state = nnx.split(optimizer)
+        self._policy_opt_def, self._policy_opt_state = nnx.split(policy_opt)
+        self._value_opt_def, self._value_opt_state = nnx.split(value_opt)
 
         self._checkpointer = checkpointer
         self._performance = performance
@@ -60,27 +62,37 @@ class Trainer(EpisodeListener):
         self._update_step = 0
 
     def save_checkpoint(self):
-        opt = nnx.merge(self._opt_def, self._opt_state)
+        policy_opt = nnx.merge(self._policy_opt_def, self._policy_opt_state)
+        value_opt = nnx.merge(self._value_opt_def, self._value_opt_state)
         model = nnx.merge(
             self._model_provider.model_def, self._model_provider.model_state
         )
         self._checkpointer.save(
-            {"opt": opt, "model": model}, self._update_step, nnx.filterlib.Any(nnx.OptState, opt.wrt) # I need to make sure nnx.OptimizerState is also saved
+            {
+                "policy_opt": policy_opt,
+                "value_opt": value_opt,
+                "model": model
+            },
+            self._update_step,
+            nnx.filterlib.Any(nnx.OptState, policy_opt.wrt, value_opt.wrt)
         )
 
     def restore_checkpoint(self, *, checkpointer: Checkpointer | None = None, wrt: nnx.filterlib.Filter | None = None):
-        opt = nnx.merge(self._opt_def, self._opt_state)
+        policy_opt: nnx.Optimizer = nnx.merge(self._policy_opt_def, self._policy_opt_state)
+        value_opt: nnx.Optimizer = nnx.merge(self._value_opt_def, self._value_opt_state)
         model = nnx.merge(
             self._model_provider.model_def, self._model_provider.model_state
         )
 
-        restore_filter = nnx.filterlib.Any(nnx.OptState, wrt or opt.wrt)
+        restore_filter = nnx.filterlib.Any(nnx.OptState, policy_opt.wrt, value_opt.wrt)
 
         if checkpointer is None:
-            step = self._checkpointer.restore_latest({"opt": opt, "model": model}, restore_filter)
+            step = self._checkpointer.restore_latest({"policy_opt": policy_opt, "value_opt": value_opt, "model": model}, restore_filter)
             self._update_step = step
-            self._opt_state = nnx.state(opt)
+            self._policy_opt_state = nnx.state(policy_opt)
+            self._value_opt_state = nnx.state(value_opt)
         else:
+            # This should be the value_opt
             checkpointer.restore_latest({"opt": ocp.PLACEHOLDER, "model": model}, ValueParam)
 
         self._model_provider.model_state = nnx.state(model)
@@ -91,9 +103,11 @@ class Trainer(EpisodeListener):
 
     def on_episodes(self, batch: UpdateBatch):
         with self._performance.time("update_step"):
-            self._opt_state, new_model_state, metrics = update_step(
-                self._opt_def,
-                self._opt_state,
+            self._policy_opt_state, self._value_opt_state, new_model_state, metrics = update_step(
+                self._policy_opt_def,
+                self._policy_opt_state,
+                self._value_opt_def,
+                self._value_opt_state,
                 self._model_provider.model_def,
                 self._model_provider.model_state,
                 batch,

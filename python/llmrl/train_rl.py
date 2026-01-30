@@ -39,7 +39,8 @@ def train_cli(
         config.env.name, eval_batch_size, experiment.environments_seed, config.env
     )
 
-    opt = make_optimizer(model, config, config.total_update_episodes)
+    policy_opt = make_optimizer(model, config.policy_optimizer, config.total_update_episodes, nnx.LoRAParam)
+    value_opt = make_optimizer(model, config.policy_optimizer, config.total_update_episodes, ValueParam)
 
     agent = LocalAgent(
         model,
@@ -54,7 +55,8 @@ def train_cli(
 
     trainer = Trainer(
         agent,
-        opt,
+        policy_opt,
+        value_opt,
         checkpointer,
         performance_tracker,
         logger,

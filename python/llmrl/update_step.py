@@ -98,20 +98,23 @@ def loss_fn(
 
 
 @jax.jit(
-    static_argnames=("opt_def", "model_def", "config", "value_only"),
-    donate_argnames=("opt_state", "model_state"),
+    static_argnames=("policy_opt_def", "value_opt_def", "model_def", "config", "value_only"),
+    donate_argnames=("policy_opt_state", "value_opt_state", "model_state"),
 )
 def update_step(
-    opt_def,
-    opt_state,
+    policy_opt_def,
+    policy_opt_state,
+    value_opt_def,
+    value_opt_state,
     model_def,
     model_state,
     rollout: UpdateBatch,
     config: LossConfig,
     value_only: bool,
 ):
-    opt = nnx.merge(opt_def, opt_state)
-    model = nnx.merge(model_def, model_state)
+    policy_opt: nnx.Optimizer = nnx.merge(policy_opt_def, policy_opt_state)
+    value_opt: nnx.Optimizer = nnx.merge(value_opt_def, value_opt_state)
+    model: Qwen3 = nnx.merge(model_def, model_state)
 
     batch_len, seq_len = rollout.context.shape
 
@@ -128,14 +131,15 @@ def update_step(
     )
 
     # do the update
-    diff = nnx.DiffState(0, opt.wrt)
+    diff = nnx.DiffState(0, nnx.Any(policy_opt.wrt, value_opt.wrt))
     grad, metrics = nnx.grad(loss_fn, argnums=diff, has_aux=True)(
         model, rollout, advantages, targets, config, bounds_mask, value_only
     )
 
-    opt.update(model, grad)
+    policy_opt.update(model, grad)
+    value_opt.update(model, grad)
 
     # metrics["value"] = values.mean(where=bounds_mask)
     metrics["episode_length"] = rollout.kv_cache_lengths.mean()
 
-    return nnx.state(opt), nnx.state(model), metrics
+    return nnx.state(policy_opt), nnx.state(value_opt), nnx.state(model), metrics
