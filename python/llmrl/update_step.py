@@ -54,13 +54,11 @@ def loss_fn(
 
     log_prob = policy.log_prob(rollout.context[:, 1:])
 
-    # temp
     if value_only:
-        # use fresh values for the target
+        # use fresh values for the target since the values were collected originally with a random value net
         _, targets = calculate_advantages(
             jnp.asarray(rollout.rewards), jax.lax.stop_gradient(values), config.gae_discount, config.gae_lambda
         )
-    # temp
 
     value_loss = model.get_value_loss(values_logits[:, :-1], targets).mean(
         where=bounds_mask[:, :-1]
@@ -89,10 +87,8 @@ def loss_fn(
         _, true_targets = calculate_advantages(
             jnp.asarray(rollout.rewards), jax.lax.stop_gradient(values), config.gae_discount, 1.0
         )
-        true_value_loss = 0.5 * jnp.square(values[:, :-1] - true_targets).mean(
-            where=bounds_mask[:, :-1]
-        )
-        metrics = {**metrics, "true_value_loss": true_value_loss}
+        value_error = jnp.mean(values[:, :-1] - true_targets, where=bounds_mask[:, :-1])
+        metrics = {**metrics, "value_error": value_error}
 
     return loss, metrics
 
@@ -112,7 +108,9 @@ def update_step(
     config: LossConfig,
     value_only: bool,
 ):
-    policy_opt: nnx.Optimizer = nnx.merge(policy_opt_def, policy_opt_state)
+    if not value_only:
+        policy_opt: nnx.Optimizer = nnx.merge(policy_opt_def, policy_opt_state)
+
     value_opt: nnx.Optimizer = nnx.merge(value_opt_def, value_opt_state)
     model: Qwen3 = nnx.merge(model_def, model_state)
 
@@ -130,16 +128,21 @@ def update_step(
         jnp.asarray(rollout.rewards), values, config.gae_discount, config.gae_lambda
     )
 
-    # do the update
-    diff = nnx.DiffState(0, nnx.Any(policy_opt.wrt, value_opt.wrt))
+    wrt =  value_opt.wrt
+    if not value_only:
+        wrt = nnx.Any(policy_opt.wrt, wrt)
+
+    diff = nnx.DiffState(0, wrt)
     grad, metrics = nnx.grad(loss_fn, argnums=diff, has_aux=True)(
         model, rollout, advantages, targets, config, bounds_mask, value_only
     )
 
-    policy_opt.update(model, grad)
+    if not value_only:
+        policy_opt.update(model, grad)
     value_opt.update(model, grad)
 
     # metrics["value"] = values.mean(where=bounds_mask)
     metrics["episode_length"] = rollout.kv_cache_lengths.mean()
 
-    return nnx.state(policy_opt), nnx.state(value_opt), nnx.state(model), metrics
+    policy_opt_state = None if value_only else nnx.state(policy_opt)
+    return policy_opt_state, nnx.state(value_opt), nnx.state(model), metrics

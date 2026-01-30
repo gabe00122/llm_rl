@@ -123,7 +123,7 @@ class Config(BaseModel):
     base_model: str
     lora: LoraConfig
     logger: LoggerConfig
-    policy_optimizer: OptimizerConfig
+    policy_optimizer: OptimizerConfig | None = None
     value_optimizer: OptimizerConfig
     loss: LossConfig
     env: ArithmeticEnvConfig | WordleEnvConfig = Field(discriminator="name")

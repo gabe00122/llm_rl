@@ -1,11 +1,3 @@
-"""
-Evaluation module for testing agents against RL environments.
-
-Supports two modes:
-1. OpenRouter/LiteLLM agents: Test base models from API providers
-2. Experiment checkpoints: Test trained LocalAgent models
-"""
-
 from dataclasses import dataclass
 from typing import Literal
 

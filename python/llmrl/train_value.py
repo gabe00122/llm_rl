@@ -58,8 +58,8 @@ def train_value_cli(config_url: str, offline_data_url: str):
     buffer.store(first_batch)
 
     total_updates = (len(data_files) * num_episodes_per_file) // config.update_envs
-    opt = make_optimizer(model, config, total_updates)
-    opt_def, opt_state = nnx.split(opt)
+    value_opt = make_optimizer(model, config.value_optimizer, total_updates, ValueParam)
+    value_opt_def, value_opt_state = nnx.split(value_opt)
     model_def, model_state = nnx.split(model)
 
     ref_context = first_batch.context[0]
@@ -81,9 +81,11 @@ def train_value_cli(config_url: str, offline_data_url: str):
             break
 
         batch = buffer.take_batch()
-        opt_state, model_state, metrics = update_step(
-            opt_def,
-            opt_state,
+        _, value_opt_state, model_state, metrics = update_step(
+            None,
+            None,
+            value_opt_def,
+            value_opt_state,
             model_def,
             model_state,
             batch,
@@ -100,8 +102,8 @@ def train_value_cli(config_url: str, offline_data_url: str):
     np.save("./values", output_values)
 
     with Checkpointer(experiment.checkpoints_url) as checkpointer:
-        opt = nnx.merge(opt_def, opt_state)
+        opt = nnx.merge(value_opt_def, value_opt_state)
         model = nnx.merge(model_def, model_state)
-        checkpointer.save({"opt": opt, "model": model}, step, nnx.filterlib.Any(nnx.OptState, ValueParam))
+        checkpointer.save({"value_opt": opt, "model": model}, step, nnx.filterlib.Any(nnx.OptState, ValueParam))
 
     logger.close()
