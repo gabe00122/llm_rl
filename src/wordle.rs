@@ -55,7 +55,7 @@ impl WordleInstance {
             if g == s {
                 feedback[i] = 'G';
                 if !self.correct[i] {
-                    reward += 1.0 / 5.0;
+                    reward += 0.1;
                     self.correct[i] = true;
                 }
             } else if secret_word.contains(g) {
@@ -108,6 +108,8 @@ impl EnvInstance for WordleInstance {
         let (obs, reward, word_found) = if let Some(guess) = guess {
             let (feedback, reward) = self.generate_feedback(&guess);
             let word_found = guess == self.shared.words[self.secret_word_index];
+
+            let reward = reward + if word_found { 0.5 } else { 0.0 }; // big bonus for the complete word correct
 
             (feedback, reward, word_found)
         } else {
