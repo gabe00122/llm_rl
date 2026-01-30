@@ -48,7 +48,8 @@ def loss_fn(
 
     positions = jnp.repeat(jnp.arange(seq_len, dtype=jnp.int32)[None, :], batch_len, 0)
 
-    logits, values, _ = model(jnp.asarray(rollout.context), positions)
+    logits, values_logits, _ = model(jnp.asarray(rollout.context), positions)
+    values = model.get_value(values_logits)
     policy = distrax.Categorical(logits=logits[:, :-1])
 
     log_prob = policy.log_prob(rollout.context[:, 1:])
@@ -61,7 +62,7 @@ def loss_fn(
         )
     # temp
 
-    value_loss = 0.5 * jnp.square(values[:, :-1] - targets).mean(
+    value_loss = model.get_value_loss(values_logits[:, :-1], targets).mean(
         where=bounds_mask[:, :-1]
     )
 

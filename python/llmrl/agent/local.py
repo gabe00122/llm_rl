@@ -1,3 +1,4 @@
+from pathlib import Path
 from llmrl.model.value_network import ValueParam
 from typing import NamedTuple
 import time
@@ -64,7 +65,7 @@ class Trainer(EpisodeListener):
             self._model_provider.model_def, self._model_provider.model_state
         )
         self._checkpointer.save(
-            {"opt": opt, "model": model}, self._update_step, opt.wrt # I need to make sure nnx.OptimizerState is also saved
+            {"opt": opt, "model": model}, self._update_step, nnx.filterlib.Any(nnx.OptState, opt.wrt) # I need to make sure nnx.OptimizerState is also saved
         )
 
     def restore_checkpoint(self, *, checkpointer: Checkpointer | None = None, wrt: nnx.filterlib.Filter | None = None):
@@ -80,7 +81,7 @@ class Trainer(EpisodeListener):
             self._update_step = step
             self._opt_state = nnx.state(opt)
         else:
-            checkpointer.restore_latest(model, ValueParam)
+            checkpointer.restore_latest({"opt": ocp.PLACEHOLDER, "model": model}, ValueParam)
 
         self._model_provider.model_state = nnx.state(model)
 
@@ -117,7 +118,8 @@ class Trainer(EpisodeListener):
 
 class EpisodeSaver(EpisodeListener):
     def __init__(self, directory: str):
-        self._directory = directory
+        self._directory = Path(directory)
+        self._directory.mkdir(parents=True, exist_ok=True)
         self.chunk_num = 0
 
     def on_episodes(self, batch: UpdateBatch):
@@ -220,16 +222,19 @@ class LocalAgent(Agent, ModelProvider):
             ],
             False,
         )
+
+        self._np_gen = get_np_gen_data(self._gen)
         append_prompt_tokens(
             self._np_gen,
             np.arange(self._config.eval_envs, dtype=np.int32),
             instruction_tokens,
         )
-        self._env_instruction_length = np.array(self._gen.context_length)
-        self._gen = self._gen._replace( # this can probably go away now
+        self._env_instruction_length = self._np_gen.context_length[0].item()
+
+        # this can probably go away now
+        self._gen = self._gen._replace(
             env_instruction_length=self._gen.context_length.copy(),
         )
-        self._np_gen = get_np_gen_data(self._gen)
 
     def _report_tps(self):
         current_tps_time = time.perf_counter()
@@ -277,18 +282,11 @@ class LocalAgent(Agent, ModelProvider):
                 )
 
             with self._performance_tracker.time("reset"):
-                # done_mask = np.zeros((self._config.eval_envs,), np.bool_)
-                # done_mask[batch_indices] = dones
-                # self._gen: GenerationState = reset_episodes(self._gen, done_mask)
-                self._np_gen.context_length[done_idx] = self._env_instruction_length[done_idx]
+                self._np_gen.context_length[done_idx] = self._env_instruction_length
                 self._np_gen.kv_cache_length[done_idx] = 0
                 self._rewards[done_idx] = 0.0
 
         with self._performance_tracker.time("encode"):
-            # context = np.array(state.context)
-            # context_length = np.array(state.context_length)
-            # turn_start_positions = np.array(state.turn_start_positions)
-            # turn_finished = np.array(state.turn_finished)
             append_user_prompts(
                 self._np_gen, batch_indices, self._tokenizer, obs
             )
@@ -310,9 +308,6 @@ class LocalAgent(Agent, ModelProvider):
             self._np_gen = get_np_gen_data(self._gen)
 
         with self._performance_tracker.time("decode"):
-            # context = np.array(gen.context)
-            # turn_start_positions = np.array(gen.turn_start_positions)
-            # context_length = np.array(gen.context_length)
             response_indices, response = decode_responses(self._tokenizer, self._np_gen)
 
         self._report_tps()

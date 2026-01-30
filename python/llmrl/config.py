@@ -50,6 +50,14 @@ class LoraConfig(BaseModel):
     attn: bool = False
     rank: int = 0
 
+class HlGaussConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    type: Literal["hl_gauss"] = "hl_gauss"
+
+    min: float
+    max: float
+    n_logits: int
+    sigma: float
 
 class ValueConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)

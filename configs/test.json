@@ -1,15 +1,14 @@
 {
     "seed": "random",
     "base_model": "Qwen/Qwen3-4B-Instruct-2507",
-    "eval_envs": 16,
-    "update_envs": 1,
-    "max_seq_length": 4096,
-    "total_update_episodes": 10000,
-    "checkpoint_every": 160,
-    "multi_step": 4,
+    "eval_envs": 32,
+    "update_envs": 4,
+    "max_seq_length": 1024,
+    "total_update_episodes": 40000,
+    "checkpoint_every": 1000,
     "lora": {
         "mlp": true,
-        "attn": false,
+        "attn": true,
         "rank": 32
     },
     "logger": {
@@ -22,14 +21,14 @@
     },
     "optimizer": {
         "type": "adamw",
-        "lr": 0.00002,
+        "lr": 0.00008,
         "beta1": 0.9,
-        "beta2": 0.95,
-        "weight_decay": 0
+        "beta2": 0.999,
+        "weight_decay": 0.0
     },
     "loss": {
-        "gae_lambda": 0.9968,
-        "gae_discount": 0.99937,
+        "gae_lambda": 0.996,
+        "gae_discount": 1.0,
         "vf_coef": 1.0,
         "pg_clip_high": 0.28,
         "pg_clip_low": 0.2

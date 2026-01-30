@@ -1,38 +1,38 @@
 {
-    "seed": "random",
-    "base_model": "Qwen/Qwen3-4B-Instruct-2507",
-    "eval_envs": 64,
-    "update_envs": 1,
-    "max_seq_length": 1024,
-    "total_update_episodes": 10000,
-    "checkpoint_every": 160,
-    "multi_step": 4,
-    "lora": {
-        "mlp": true,
-        "attn": false,
-        "rank": 32
-    },
-    "logger": {
-        "use_console": false,
-        "use_wandb": false
-    },
-    "schedule": {
-        "type": "warmup_cosine",
-        "warmup_ratio": 0.1
-    },
-    "optimizer": {
-        "type": "sgd",
-        "lr": 0.0002
-    },
-    "loss": {
-        "gae_lambda": 0.9968,
-        "gae_discount": 0.99937,
-        "vf_coef": 10.0,
-        "pg_clip_high": 0.28,
-        "pg_clip_low": 0.2
-    },
-    "env": {
-        "name": "wordle",
-        "max_guesses": 6
-    }
+  "seed": "random",
+  "base_model": "Qwen/Qwen3-4B-Instruct-2507",
+  "eval_envs": 72,
+  "update_envs": 1,
+  "max_seq_length": 1024,
+  "total_update_episodes": 10000,
+  "checkpoint_every": 160,
+  "multi_step": 4,
+  "lora": {
+    "mlp": true,
+    "attn": false,
+    "rank": 32
+  },
+  "logger": {
+    "use_console": false,
+    "use_wandb": false
+  },
+  "schedule": {
+    "type": "warmup_cosine",
+    "warmup_ratio": 0.1
+  },
+  "optimizer": {
+    "type": "sgd",
+    "lr": 0.0002
+  },
+  "loss": {
+    "gae_lambda": 0.9968,
+    "gae_discount": 0.99937,
+    "vf_coef": 10.0,
+    "pg_clip_high": 0.28,
+    "pg_clip_low": 0.2
+  },
+  "env": {
+    "name": "wordle",
+    "max_guesses": 6
+  }
 }

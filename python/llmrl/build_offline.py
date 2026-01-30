@@ -23,7 +23,7 @@ def _get_start(p: str):
     for f in files:
         num = int(f.name[9:-4])
         max_num = max(max_num, num)
-    
+
     return max_num
 
 
@@ -69,4 +69,3 @@ def build_offline(config_url: str, output_path: str, file_size: int, file_count:
         env_indices, actions = agent.act(env_indices, obs, rewards, dones)
         with performance_tracker.time("env_step"):
             obs, rewards, dones = env.step(env_indices, actions)
-

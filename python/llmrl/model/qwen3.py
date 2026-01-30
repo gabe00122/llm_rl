@@ -15,22 +15,24 @@ def wrap_param(node: nnx.Module, param):
     for path, value in nnx.iter_graph(node):
         if isinstance(value, nnx.Param):
             *path, key = path
-            
+
             target = node
             for p in path:
                 if isinstance(p, int):
                     target = target[p]
                 else:
                     target = getattr(target, p)
-            
+
             setattr(target, key, param(value[...]))
 
 class ValueLayer(nnx.Module):
     def __init__(self, config: LLMConfig, in_latent: int, *, rngs: nnx.Rngs):
+        encode_rank = 64
+
         self.layer = Qwen3Layer(config=config, rngs=rngs)
         self.in_norm = nnx.RMSNorm(in_latent, rngs=rngs)
-        self.in_proj = nnx.Linear(in_latent, 32, rngs=rngs)
-        self.in_up_proj = nnx.Linear(32, config.embed, rngs=rngs)
+        self.in_proj = nnx.Linear(in_latent, encode_rank, rngs=rngs)
+        self.in_up_proj = nnx.Linear(encode_rank, config.embed, rngs=rngs)
 
     def initialize_carry(self, batch_size: int, seq_length: int):
         return self.layer.initialize_carry(batch_size, seq_length)
@@ -164,3 +166,9 @@ class Qwen3(nnx.Module):
         return tuple(
             (layer.initialize_carry(batch_size, seq_length), value_layer.initialize_carry(batch_size, seq_length)) for layer, value_layer in zip(self.layers, self.value_layers)
         )
+
+    def get_value(self, repr: jax.Array) -> jax.Array:
+        return self.value_net.output.get_value(repr)
+
+    def get_value_loss(self, repr: jax.Array, target_values: jax.Array) -> jax.Array:
+        return self.value_net.output.get_loss(repr, target_values)

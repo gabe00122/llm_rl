@@ -17,37 +17,36 @@ class Checkpointer:
     def save(self, data: dict[str, Any], global_step: int, param_filter: Filter = nnx.Param):
         data_state = {}
         for key, value in data.items():
-            data_state[key] = nnx.state(value, param_filter)
+            data_state[key] = ocp.args.StandardSave(nnx.state(value, param_filter))
 
-        self.mngr.save(global_step, args=ocp.args.StandardSave(data_state))
+        self.mngr.save(global_step, args=ocp.args.Composite(**data_state))
 
     def restore(self, data: dict[str, Any], step: int, param_filter: Filter = nnx.Param):
         device = jax.devices()[0]
         mesh = Mesh((device,), ("batch",))
 
         data_abstract_state = {}
+        restorable_keys = []
 
         for key, value in data.items():
-            if value is ...:
-                data_abstract_state[key] = value
-            else:
+            if value is not ocp.PLACEHOLDER:
+                restorable_keys.append(key)
                 value_state = nnx.state(value, param_filter)
                 abstract_state = jax.tree.map(
                     lambda x, s: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype, sharding=s),
                     value_state,
                     nnx.get_named_sharding(value_state, mesh),
                 )
-                data_abstract_state[key] = abstract_state
-
+                data_abstract_state[key] = ocp.args.StandardRestore(abstract_state)
 
         restored_state = self.mngr.restore(
-            step, args=ocp.args.StandardRestore(data_abstract_state)
+            step, args=ocp.args.Composite(**data_abstract_state)
         )
 
         for key, value in restored_state.items():
             nnx.update(data[key], value)
 
-    def restore_latest(self, model: object, param_filter: Filter = nnx.Param) -> int:
+    def restore_latest(self, model, param_filter: Filter = nnx.Param) -> int:
         step = self.mngr.latest_step()
         if step is None:
             return 0

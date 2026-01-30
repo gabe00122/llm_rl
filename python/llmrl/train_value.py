@@ -20,8 +20,15 @@ from llmrl.utils.optimizer import make_optimizer
 def calculate_values(model_def, model_state, context: jax.Array):
     model = nnx.merge(model_def, model_state)
     positions = jnp.arange(context.shape[0])
-    _, values, _ = model(context[None, :], positions[None, :], None)
+    _, values_repr, _ = model(context[None, :], positions[None, :], None)
+    values = model.get_value(values_repr)
     return jnp.squeeze(values, 0)
+
+
+def print_value_param_count(model):
+    value_params = nnx.state(model, ValueParam)
+    param_count = sum(x.size for x in jax.tree.leaves(value_params))
+    print(f"Value Parameters: {param_count}")
 
 
 def train_value_cli(config_url: str, offline_data_url: str):
@@ -33,6 +40,7 @@ def train_value_cli(config_url: str, offline_data_url: str):
 
     rngs = nnx.Rngs(experiment.params_seed)
     model, tokenizer, sampling = load_base_model(config.base_model, rngs)
+    print_value_param_count(model)
 
     data_dir = Path(offline_data_url)
     if not data_dir.exists() or not data_dir.is_dir():
@@ -56,7 +64,7 @@ def train_value_cli(config_url: str, offline_data_url: str):
 
     ref_context = first_batch.context[0]
     output_values = np.zeros((total_updates, config.max_seq_length))
-    
+
     step = 0
     file_idx = 1
     while file_idx < len(data_files) or buffer.has_batch:
@@ -88,12 +96,12 @@ def train_value_cli(config_url: str, offline_data_url: str):
         metrics["reward"] = batch.rewards.sum(axis=1).mean()
         logger.log_dict(metrics, step)
         step += 1
-    
+
     np.save("./values", output_values)
 
     with Checkpointer(experiment.checkpoints_url) as checkpointer:
         opt = nnx.merge(opt_def, opt_state)
         model = nnx.merge(model_def, model_state)
-        checkpointer.save({"opt": opt, "model": model}, step, ValueParam)
+        checkpointer.save({"opt": opt, "model": model}, step, nnx.filterlib.Any(nnx.OptState, ValueParam))
 
     logger.close()

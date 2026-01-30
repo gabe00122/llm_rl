@@ -173,7 +173,7 @@ def reset_episodes(state: GenerationState, done_mask: jax.Array) -> GenerationSt
 
 
 @jax.jit(
-    static_argnames=("model_def", "sampling", "wait_for", "calculate_value"), donate_argnames=("gen",)
+    static_argnames=("model_def", "sampling", "wait_for"), donate_argnames=("gen",)
 )
 def generate(
     model_def,
@@ -193,13 +193,13 @@ def generate(
     def body(carry: GenerationState):
         in_tokens = batched_take(carry.context, carry.kv_cache_length)
 
-        logits, value, kv_cache = model(
+        logits, value_repr, kv_cache = model(
             in_tokens[..., None],  # add time axis
             carry.kv_cache_length[..., None],
             carry.kv_cache,
         )
         logits = logits.squeeze(-2)  # remove time axis
-        value = value.squeeze(-1)
+        value = model.get_value(value_repr).squeeze(-1)
 
         sample_key, rng_key = jax.random.split(carry.rng_key)
 
