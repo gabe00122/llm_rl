@@ -15,16 +15,31 @@
         "use_console": true,
         "use_wandb": true
     },
-    "schedule": {
-        "type": "warmup_cosine",
-        "warmup_ratio": 0.1
+    "policy_optimizer": {
+        "opt": {
+            "type": "adamw",
+            "lr": 0.00001,
+            "beta1": 0.9,
+            "beta2": 0.999,
+            "weight_decay": 0.0
+        },
+        "schedule": {
+            "type": "warmup_cosine",
+            "warmup_ratio": 0.1
+        }
     },
-    "optimizer": {
-        "type": "adamw",
-        "lr": 0.00008,
-        "beta1": 0.9,
-        "beta2": 0.999,
-        "weight_decay": 0.0
+    "value_optimizer": {
+        "opt": {
+            "type": "adamw",
+            "lr": 0.0002,
+            "beta1": 0.9,
+            "beta2": 0.999,
+            "weight_decay": 0.0
+        },
+        "schedule": {
+            "type": "warmup_cosine",
+            "warmup_ratio": 0.1
+        }
     },
     "loss": {
         "gae_lambda": 0.996,
