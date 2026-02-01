@@ -28,10 +28,8 @@ class LLMConfig(BaseModel):
     kv_heads: int
     num_layers: int
     head_dim: int
-    vocab_size: int
-    # MLP
+    vocab_size: int = -1
     mlp_ffw_size: int = -1
-    # kernel config
     norm_eps: float = 1e-6
     rope_theta: float = 500000.0
 
@@ -50,6 +48,10 @@ class LoraConfig(BaseModel):
     attn: bool = False
     rank: int = 0
 
+class MseCriticConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    type: Literal["mse"] = "mse"
+
 class HlGaussConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     type: Literal["hl_gauss"] = "hl_gauss"
@@ -59,10 +61,12 @@ class HlGaussConfig(BaseModel):
     n_logits: int
     sigma: float
 
+
 class ValueConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    width: int
-
+    laten_encoder_rank: int
+    backbone: LLMConfig
+    head: HlGaussConfig | MseCriticConfig = Field(discriminator="type")
 
 class TrainerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -122,6 +126,7 @@ class Config(BaseModel):
     seed: int | Literal["random"] = "random"
     base_model: str
     lora: LoraConfig
+    value_net: ValueConfig
     logger: LoggerConfig
     policy_optimizer: OptimizerConfig | None = None
     value_optimizer: OptimizerConfig

@@ -30,6 +30,7 @@ def train_cli(
 
     rngs = nnx.Rngs(experiment.params_seed)
     model, tokenizer, sampling = load_base_model(config.base_model, rngs)
+    model.initalize_value_net(config.value_net, rngs=rngs)
     model.initialize_lora(config.lora, rngs=rngs)
 
     checkpointer = Checkpointer(experiment.checkpoints_url)
@@ -40,7 +41,7 @@ def train_cli(
     )
 
     policy_opt = make_optimizer(model, config.policy_optimizer, config.total_update_episodes, nnx.LoRAParam)
-    value_opt = make_optimizer(model, config.policy_optimizer, config.total_update_episodes, ValueParam)
+    value_opt = make_optimizer(model, config.value_optimizer, config.total_update_episodes, ValueParam)
 
     agent = LocalAgent(
         model,

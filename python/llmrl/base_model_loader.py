@@ -88,4 +88,3 @@ def load_base_model(model_name: str, rngs: nnx.Rngs):
     model.load_params(params)
 
     return model, tokenizer, sampling
-

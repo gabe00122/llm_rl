@@ -47,7 +47,7 @@ class LiteAgent(Agent):
                 messages.append({"role": "system", "content": self._instructions})
 
     def _complete_with_retry(self, id, messages) -> tuple[int, ModelResponse]:
-        reasoning_effort = "high"
+        reasoning_effort = "low"
         for _ in range(3):
             try:
                 return id, completion(

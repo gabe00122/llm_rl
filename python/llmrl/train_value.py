@@ -40,6 +40,7 @@ def train_value_cli(config_url: str, offline_data_url: str):
 
     rngs = nnx.Rngs(experiment.params_seed)
     model, tokenizer, sampling = load_base_model(config.base_model, rngs)
+    model.initalize_value_net(config.value_net, rngs=rngs)
     print_value_param_count(model)
 
     data_dir = Path(offline_data_url)

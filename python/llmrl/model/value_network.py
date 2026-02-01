@@ -1,4 +1,5 @@
-from llmrl.config import HlGaussConfig
+from llmrl.config import HlGaussConfig, LLMConfig, ValueConfig, MseCriticConfig
+from llmrl.model.layer import Qwen3Layer
 
 import typing as tp
 
@@ -27,7 +28,7 @@ def calculate_supports(config: HlGaussConfig):
     return support, centers
 
 
-class HlGaussValue(nnx.Module):
+class HlGaussHead(nnx.Module):
     def __init__(
         self, in_features: int, hl_gauss_config: HlGaussConfig, *, rngs: nnx.Rngs
     ) -> None:
@@ -65,7 +66,7 @@ class HlGaussValue(nnx.Module):
         return loss.reshape(b, t)
 
 
-class MseValue(nnx.Module):
+class MseHead(nnx.Module):
     def __init__(self, in_features: int, *, rngs: nnx.Rngs) -> None:
         self.dense = nnx.Linear(in_features, 1, rngs=rngs)
 
@@ -84,28 +85,101 @@ class ValueParam(variablelib.Param[A]):
     pass
 
 
-class ValueNetwork(nnx.Module):
-    def __init__(self, in_features: int, hidden_features: int, *, rngs: nnx.Rngs):
-        super().__init__()
-
-        initializer = nnx.initializers.he_normal()
-        self.up = ValueParam(
-            initializer(rngs.param(), (in_features, hidden_features), jnp.bfloat16)
+class ValueNetEncode(nnx.Module):
+    def __init__(self, latent_size: int, latent_encode_rank: int, out_size: int, *, rngs: nnx.Rngs):
+        self._normalize = nnx.RMSNorm(latent_size, rngs=rngs)
+        self._encode_up = nnx.Linear(
+            latent_size,
+            latent_encode_rank,
+            param_dtype=jnp.bfloat16,
+            rngs=rngs
         )
-        self.up_bias = ValueParam(jnp.zeros(hidden_features, dtype=jnp.bfloat16))
-        self.output = HlGaussValue(hidden_features, HlGaussConfig(
-            min=0.0,
-            max=1.0,
-            n_logits=51,
-            sigma=0.01
-        ), rngs=rngs)
-        # self.output = MseValue(hidden_features, rngs=rngs)
+        self._encode_down = nnx.Linear(
+            latent_encode_rank,
+            out_size,
+            param_dtype=jnp.bfloat16,
+            rngs=rngs
+        )
 
     def __call__(self, x: jax.Array) -> jax.Array:
-        # x = jax.lax.stop_gradient(x)
-        x = x @ self.up[:]
-        x = x + self.up_bias[:]
+        x = jax.lax.stop_gradient(x)
+        x = self._normalize(x)
+        x = self._encode_up(x)
         x = jax.nn.silu(x)
-        x = self.output(x)
-
+        x = self._encode_down(x)
         return x
+
+
+class ValueNetLayer(nnx.Module):
+    def __init__(self, config: LLMConfig, latent_size: int, latent_encode_rank: int, *, rngs: nnx.Rngs):
+        self._latent_encode = ValueNetEncode(latent_size, latent_encode_rank, config.embed, rngs=rngs)
+        self._layer = Qwen3Layer(config, rngs=rngs)
+
+    def __call__(self, x: jax.Array, latent: jax.Array, positions: jax.Array, carry: Any = None) -> tuple[jax.Array, Any]:
+        x = x + self._latent_encode(latent)
+        return self._layer(x, positions, carry)
+
+    def initialize_carry(self, batch_size: int, seq_length: int) -> Any:
+        return self._layer.initialize_carry(batch_size, seq_length)
+
+
+class ValueBackbone(nnx.Module):
+    def __init__(self, config: ValueConfig, latent_size: int, *, rngs: nnx.Rngs):
+        self._embeding_encode = ValueNetEncode(latent_size, config.laten_encoder_rank, config.backbone.embed, rngs=rngs)
+
+        self.layers = nnx.List([
+            ValueNetLayer(
+                config=config.backbone,
+                latent_size=latent_size,
+                latent_encode_rank=config.laten_encoder_rank,
+                rngs=rngs,
+            ) for _ in range(config.backbone.num_layers)
+        ])
+
+        self.final_norm = nnx.RMSNorm(
+            config.backbone.embed,
+            epsilon=config.backbone.norm_eps,
+            dtype=jnp.bfloat16,
+            param_dtype=jnp.bfloat16,
+            rngs=rngs,
+        )
+
+        if isinstance(config.head, HlGaussConfig):
+            self._head = HlGaussHead(config.backbone.embed, config.head, rngs=rngs)
+        elif isinstance(config.head, MseCriticConfig):
+            self._head = MseHead(config.backbone.embed, rngs=rngs)
+
+    def __call__(self, latents: list[jax.Array], positions: jax.Array, carry: tuple[Any, ...] | None = None):
+        x, *layer_latents = latents
+
+        take_every = len(layer_latents) // len(self.layers)
+        layer_latents = layer_latents[::take_every][:len(self.layers)]
+
+        x = self._embeding_encode(x)
+
+        if carry is not None:
+            out_carry = []
+            for layer, latent, carry_in in zip(self.layers, layer_latents, carry):
+                x, carry_out = layer(x, latent, positions, carry_in)
+
+                out_carry.append(carry_out)
+
+            carry = tuple(out_carry)
+        else:
+            for layer, latent in zip(self.layers, layer_latents):
+                x, _ = jax.checkpoint(layer)(x, latent, positions)
+
+        x = self.final_norm(x)
+        value_repr = self._head(x)
+        return value_repr
+
+    def initialize_carry(self, batch_size: int, seq_length: int):
+        return tuple(
+            layer.initialize_carry(batch_size, seq_length) for layer in self.layers
+        )
+
+    def get_value(self, repr: jax.Array) -> jax.Array:
+        return self._head.get_value(repr)
+
+    def get_value_loss(self, repr: jax.Array, target_values: jax.Array) -> jax.Array:
+        return self._head.get_loss(repr, target_values)
