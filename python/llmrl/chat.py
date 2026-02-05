@@ -193,16 +193,16 @@ def generate(
     def body(carry: GenerationState):
         in_tokens = batched_take(carry.context, carry.kv_cache_length)
 
-        logits, value_repr, kv_cache = model(
+        logits, value_repr, kv_cache, rng_key = model(
             in_tokens[..., None],  # add time axis
             carry.kv_cache_length[..., None],
             carry.kv_cache,
+            rng_key=carry.rng_key,
         )
         logits = logits.squeeze(-2)  # remove time axis
         value = model.get_value(value_repr).squeeze(-1)
 
-        sample_key, rng_key = jax.random.split(carry.rng_key)
-
+        rng_key, sample_key = jax.random.split(rng_key)
         dist = Categorical(logits=logits)
         sample_tokens: jax.Array = dist.sample(seed=sample_key)
         log_prob: jax.Array = dist.log_prob(sample_tokens)

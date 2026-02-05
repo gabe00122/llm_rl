@@ -87,8 +87,15 @@ class ValueParam(variablelib.Param[A]):
 
 class ValueNetEncode(nnx.Module):
     def __init__(self, latent_size: int, latent_encode_rank: int, out_size: int, *, rngs: nnx.Rngs):
+        self._dropout = nnx.Dropout(0.1)
         self._normalize = nnx.RMSNorm(latent_size, rngs=rngs)
         self._encode_up = nnx.Linear(
+            latent_size,
+            latent_encode_rank,
+            param_dtype=jnp.bfloat16,
+            rngs=rngs
+        )
+        self._up_gate = nnx.Linear(
             latent_size,
             latent_encode_rank,
             param_dtype=jnp.bfloat16,
@@ -101,13 +108,17 @@ class ValueNetEncode(nnx.Module):
             rngs=rngs
         )
 
-    def __call__(self, x: jax.Array) -> jax.Array:
+    def __call__(self, x: jax.Array, *, rng_key: jax.Array) -> tuple[jax.Array, jax.Array]:
+        rng_key, dropout_rng = jax.random.split(rng_key)
+
         x = jax.lax.stop_gradient(x)
+        x = self._dropout(x, rngs=dropout_rng)
         x = self._normalize(x)
+        gate = self._up_gate(x)
         x = self._encode_up(x)
-        x = jax.nn.silu(x)
+        x = jax.nn.silu(x) * gate
         x = self._encode_down(x)
-        return x
+        return x, dropout_rng
 
 
 class ValueNetLayer(nnx.Module):
@@ -115,9 +126,10 @@ class ValueNetLayer(nnx.Module):
         self._latent_encode = ValueNetEncode(latent_size, latent_encode_rank, config.embed, rngs=rngs)
         self._layer = Qwen3Layer(config, rngs=rngs)
 
-    def __call__(self, x: jax.Array, latent: jax.Array, positions: jax.Array, carry: Any = None) -> tuple[jax.Array, Any]:
-        x = x + self._latent_encode(latent)
-        return self._layer(x, positions, carry)
+    def __call__(self, x: jax.Array, latent: jax.Array, positions: jax.Array, carry: Any = None, *, rng_key: jax.Array) -> tuple[jax.Array, Any, jax.Array]:
+        latent, rng_key = self._latent_encode(latent, rng_key=rng_key)
+        x, carry = self._layer(x + latent, positions, carry)
+        return x, carry, rng_key
 
     def initialize_carry(self, batch_size: int, seq_length: int) -> Any:
         return self._layer.initialize_carry(batch_size, seq_length)
@@ -149,29 +161,29 @@ class ValueBackbone(nnx.Module):
         elif isinstance(config.head, MseCriticConfig):
             self._head = MseHead(config.backbone.embed, rngs=rngs)
 
-    def __call__(self, latents: list[jax.Array], positions: jax.Array, carry: tuple[Any, ...] | None = None):
+    def __call__(self, latents: list[jax.Array], positions: jax.Array, carry: tuple[Any, ...] | None = None, *, rng_key: jax.Array):
         x, *layer_latents = latents
 
         take_every = len(layer_latents) // len(self.layers)
         layer_latents = layer_latents[::take_every][:len(self.layers)]
 
-        x = self._embeding_encode(x)
+        x, rng_key = self._embeding_encode(x, rng_key=rng_key)
 
         if carry is not None:
             out_carry = []
             for layer, latent, carry_in in zip(self.layers, layer_latents, carry):
-                x, carry_out = layer(x, latent, positions, carry_in)
+                x, carry_out, rng_key = layer(x, latent, positions, carry_in, rng_key=rng_key)
 
                 out_carry.append(carry_out)
 
             carry = tuple(out_carry)
         else:
             for layer, latent in zip(self.layers, layer_latents):
-                x, _ = jax.checkpoint(layer)(x, latent, positions)
+                x, _, rng_key = jax.checkpoint(layer)(x, latent, positions, rng_key=rng_key)
 
         x = self.final_norm(x)
         value_repr = self._head(x)
-        return value_repr
+        return value_repr, carry, rng_key
 
     def initialize_carry(self, batch_size: int, seq_length: int):
         return tuple(
@@ -181,5 +193,5 @@ class ValueBackbone(nnx.Module):
     def get_value(self, repr: jax.Array) -> jax.Array:
         return self._head.get_value(repr)
 
-    def get_value_loss(self, repr: jax.Array, target_values: jax.Array) -> jax.Array:
+    def get_loss(self, repr: jax.Array, target_values: jax.Array) -> jax.Array:
         return self._head.get_loss(repr, target_values)

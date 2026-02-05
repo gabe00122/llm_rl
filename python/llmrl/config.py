@@ -87,6 +87,9 @@ class SGDConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     type: Literal["sgd"] = "sgd"
     lr: float
+    momentum: float | None = None
+    nesterov: bool = False
+
 
 class AdamWConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -95,6 +98,7 @@ class AdamWConfig(BaseModel):
     beta1: float = 0.9
     beta2: float = 0.999
     weight_decay: float = 0.01
+    eps: float = 1e-8
 
 
 class WarmupCosineConfig(BaseModel):

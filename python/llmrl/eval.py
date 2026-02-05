@@ -214,20 +214,21 @@ def eval_checkpoint(
     rngs = nnx.Rngs(experiment.params_seed)
     model, tokenizer, _ = load_base_model(config.base_model, rngs)
     model.initialize_lora(config.lora, rngs=rngs)
+    model.initalize_value_net(config.value_net, rngs=rngs)
 
     # Load checkpoint
     checkpointer = Checkpointer(experiment.checkpoints_url)
     if checkpoint_step is not None:
         checkpointer.restore(
-            {"model": model, "opt": ocp.PLACEHOLDER},
+            {"model": model},
             checkpoint_step,
-            nnx.Any(ValueParam, nnx.LoRAParam),
+            nnx.Any(nnx.LoRAParam, ValueParam),
         )
         console.print(f"[bold]Checkpoint step:[/bold] {checkpoint_step}")
     else:
         checkpointer.restore_latest(
-            {"model": model, "opt": ocp.PLACEHOLDER},
-            nnx.Any(ValueParam, nnx.LoRAParam),
+            {"model": model},
+            nnx.Any(nnx.LoRAParam, ValueParam),
         )
         console.print(
             f"[bold]Checkpoint step:[/bold] latest ({checkpointer.mngr.latest_step()})"

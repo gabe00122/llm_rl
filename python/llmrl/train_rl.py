@@ -58,6 +58,7 @@ def train_cli(
         agent,
         policy_opt,
         value_opt,
+        rngs.trainer(),
         checkpointer,
         performance_tracker,
         logger,

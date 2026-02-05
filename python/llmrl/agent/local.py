@@ -46,6 +46,7 @@ class Trainer(EpisodeListener):
         model_provider: ModelProvider,
         policy_opt: nnx.Optimizer,
         value_opt: nnx.Optimizer,
+        rng_key: jax.Array,
         checkpointer: Checkpointer,
         performance: PerformanceTracker,
         logger: BaseLogger,
@@ -54,6 +55,7 @@ class Trainer(EpisodeListener):
         self._model_provider = model_provider
         self._policy_opt_def, self._policy_opt_state = nnx.split(policy_opt)
         self._value_opt_def, self._value_opt_state = nnx.split(value_opt)
+        self._rng_key = rng_key
 
         self._checkpointer = checkpointer
         self._performance = performance
@@ -104,13 +106,14 @@ class Trainer(EpisodeListener):
 
     def on_episodes(self, batch: UpdateBatch):
         with self._performance.time("update_step"):
-            self._policy_opt_state, self._value_opt_state, new_model_state, metrics = update_step(
+            self._policy_opt_state, self._value_opt_state, new_model_state, metrics, self._rng_key = update_step(
                 self._policy_opt_def,
                 self._policy_opt_state,
                 self._value_opt_def,
                 self._value_opt_state,
                 self._model_provider.model_def,
                 self._model_provider.model_state,
+                self._rng_key,
                 batch,
                 self._config.loss,
                 False,

@@ -22,6 +22,8 @@ def make_optimizer(model: nnx.Module, opt_config: OptimizerConfig, total_steps: 
     if isinstance(opt_config.opt, SGDConfig):
         tx = optax.sgd(
             learning_rate=tx_lr,
+            momentum=opt_config.opt.momentum,
+            nesterov=opt_config.opt.nesterov,
         )
     elif isinstance(opt_config.opt, AdamWConfig):
         tx = optax.adamw(
@@ -29,6 +31,7 @@ def make_optimizer(model: nnx.Module, opt_config: OptimizerConfig, total_steps: 
             b1=opt_config.opt.beta1,
             b2=opt_config.opt.beta2,
             weight_decay=opt_config.opt.weight_decay,
+            eps=opt_config.opt.eps,
         )
     else:
         raise ValueError(f"Unsupported optimizer type: {opt_config.opt.type}")

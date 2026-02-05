@@ -12,22 +12,6 @@ from llmrl.model.value_network import ValueBackbone
 from llmrl.model.util import wrap_param
 
 
-class ValueLayer(nnx.Module):
-    def __init__(self, config: LLMConfig, in_latent: int, *, rngs: nnx.Rngs):
-        encode_rank = 64
-
-        self.layer = Qwen3Layer(config=config, rngs=rngs)
-        self.in_norm = nnx.RMSNorm(in_latent, rngs=rngs)
-        self.in_proj = nnx.Linear(in_latent, encode_rank, rngs=rngs)
-        self.in_up_proj = nnx.Linear(encode_rank, config.embed, rngs=rngs)
-
-    def initialize_carry(self, batch_size: int, seq_length: int):
-        return self.layer.initialize_carry(batch_size, seq_length)
-
-    def __call__(self, latent: jax.Array, value_latent: jax.Array, positions: jax.Array, carry: KVCache | None = None):
-        in_latents = self.in_up_proj(nnx.silu(self.in_proj(self.in_norm(jax.lax.stop_gradient(latent)))))
-        return self.layer(value_latent + in_latents, positions, carry)
-
 class Qwen3(nnx.Module):
     def __init__(
         self,
@@ -61,8 +45,6 @@ class Qwen3(nnx.Module):
             rngs=rngs,
         )
 
-        self.value_net = None
-
     def initalize_value_net(self, value_config: ValueConfig, *, rngs: nnx.Rngs):
         self.value_net = ValueBackbone(value_config, self._embed, rngs=rngs)
         wrap_param(self.value_net, ValueParam)
@@ -91,7 +73,9 @@ class Qwen3(nnx.Module):
         tokens: jax.Array,
         positions: jax.Array,
         carry: Any = None,
-    ) -> tuple[jax.Array, jax.Array, Any]:
+        *,
+        rng_key: jax.Array,
+    ) -> tuple[jax.Array, jax.Array, Any, jax.Array]:
         x = self.embeddings(tokens)
 
         if carry is not None:
@@ -107,7 +91,7 @@ class Qwen3(nnx.Module):
             base_carry = tuple(out_carry)
 
             if self.value_net is not None:
-                value_repr, value_carry = self.value_net(latents, positions, value_carry)
+                value_repr, value_carry, rng_key = self.value_net(latents, positions, value_carry, rng_key=rng_key)
             carry = base_carry, value_carry
         else:
             latents = [x]
@@ -116,14 +100,14 @@ class Qwen3(nnx.Module):
                 latents.append(x)
 
             if self.value_net is not None:
-                value_repr, _ = self.value_net(latents, positions)
+                value_repr, _, rng_key = self.value_net(latents, positions, rng_key=rng_key)
 
         x = self.final_norm(x)
         logits = x @ self.embeddings.embedding.T
 
         logits = logits.astype(jnp.float32)
 
-        return logits, value_repr, carry
+        return logits, value_repr, carry, rng_key
 
     def initialize_carry(self, batch_size: int, seq_length: int):
         base_carry = tuple(layer.initialize_carry(batch_size, seq_length) for layer in self.layers)

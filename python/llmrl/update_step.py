@@ -41,14 +41,15 @@ def loss_fn(
     config: LossConfig,
     bounds_mask: jax.Array,
     value_only: bool,
-) -> tuple[jax.Array, dict[str, jax.Array]]:
+    rng_key: jax.Array,
+) -> tuple[jax.Array, tuple[dict[str, jax.Array], jax.Array]]:
     batch_len, seq_len = rollout.context.shape
 
     policy_mask = rollout.policy_mask
 
     positions = jnp.repeat(jnp.arange(seq_len, dtype=jnp.int32)[None, :], batch_len, 0)
 
-    logits, values_logits, _ = model(jnp.asarray(rollout.context), positions)
+    logits, values_logits, _, rng_key = model(jnp.asarray(rollout.context), positions, rng_key=rng_key)
     values = model.get_value(values_logits)
     policy = distrax.Categorical(logits=logits[:, :-1])
 
@@ -87,10 +88,10 @@ def loss_fn(
         _, true_targets = calculate_advantages(
             jnp.asarray(rollout.rewards), jax.lax.stop_gradient(values), config.gae_discount, 1.0
         )
-        value_error = jnp.mean(values[:, :-1] - true_targets, where=bounds_mask[:, :-1])
+        value_error = jnp.mean(jnp.abs(values[:, :-1] - true_targets), where=bounds_mask[:, :-1])
         metrics = {**metrics, "value_error": value_error}
 
-    return loss, metrics
+    return loss, (metrics, rng_key)
 
 
 @jax.jit(
@@ -104,6 +105,7 @@ def update_step(
     value_opt_state,
     model_def,
     model_state,
+    rng_key: jax.Array,
     rollout: UpdateBatch,
     config: LossConfig,
     value_only: bool,
@@ -133,8 +135,8 @@ def update_step(
         wrt = nnx.Any(policy_opt.wrt, wrt)
 
     diff = nnx.DiffState(0, wrt)
-    grad, metrics = nnx.grad(loss_fn, argnums=diff, has_aux=True)(
-        model, rollout, advantages, targets, config, bounds_mask, value_only
+    grad, (metrics, rng_key) = nnx.grad(loss_fn, argnums=diff, has_aux=True)(
+        model, rollout, advantages, targets, config, bounds_mask, value_only, rng_key
     )
 
     if not value_only:
@@ -145,4 +147,4 @@ def update_step(
     metrics["episode_length"] = rollout.kv_cache_lengths.mean()
 
     policy_opt_state = None if value_only else nnx.state(policy_opt)
-    return policy_opt_state, nnx.state(value_opt), nnx.state(model), metrics
+    return policy_opt_state, nnx.state(value_opt), nnx.state(model), metrics, rng_key

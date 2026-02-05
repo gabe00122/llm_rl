@@ -17,12 +17,12 @@ from llmrl.utils.optimizer import make_optimizer
 
 
 @jax.jit(static_argnames=('model_def'))
-def calculate_values(model_def, model_state, context: jax.Array):
+def calculate_values(model_def, model_state, rng_key, context: jax.Array):
     model = nnx.merge(model_def, model_state)
     positions = jnp.arange(context.shape[0])
-    _, values_repr, _ = model(context[None, :], positions[None, :], None)
+    _, values_repr, _, rng_key = model(context[None, :], positions[None, :], None, rng_key=rng_key)
     values = model.get_value(values_repr)
-    return jnp.squeeze(values, 0)
+    return jnp.squeeze(values, 0), rng_key
 
 
 def print_value_param_count(model):
@@ -66,6 +66,8 @@ def train_value_cli(config_url: str, offline_data_url: str):
     ref_context = first_batch.context[0]
     output_values = np.zeros((total_updates, config.max_seq_length))
 
+    rng_key = rngs()
+
     step = 0
     file_idx = 1
     while file_idx < len(data_files) or buffer.has_batch:
@@ -82,18 +84,19 @@ def train_value_cli(config_url: str, offline_data_url: str):
             break
 
         batch = buffer.take_batch()
-        _, value_opt_state, model_state, metrics = update_step(
+        _, value_opt_state, model_state, metrics, rng_key = update_step(
             None,
             None,
             value_opt_def,
             value_opt_state,
             model_def,
             model_state,
+            rng_key,
             batch,
             config.loss,
             True,
         )
-        values = calculate_values(model_def, model_state, ref_context)
+        values, rng_key = calculate_values(model_def, model_state, rng_key, ref_context)
         output_values[step] = np.array(values)
 
         metrics["reward"] = batch.rewards.sum(axis=1).mean()
