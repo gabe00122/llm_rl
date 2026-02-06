@@ -4,6 +4,7 @@ use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::prelude::*;
 use rand::prelude::*;
 use regex::Regex;
+use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
 
@@ -30,7 +31,7 @@ impl EnvShared for WordleShared {
 
         Self {
             settings,
-            guess_re: Regex::new(r"[A-Z]{5}").unwrap(),
+            guess_re: Regex::new(r"(?i)\b[a-z]{5}\b").unwrap(),
             words,
         }
     }
@@ -41,36 +42,57 @@ struct WordleInstance {
     rng: SmallRng,
     secret_word_index: usize,
     guesses: usize,
-    correct: [bool; 5],
+    got_yellow: [bool; 5],
+    got_green: [bool; 5],
 }
 
 impl WordleInstance {
     fn generate_feedback(&mut self, guess: &str) -> (String, f32) {
         let secret_word: &str = &self.shared.words[self.secret_word_index];
-
-        let mut reward = 0.0;
-        let mut feedback = ['-'; 5];
+        let mut output: Vec<String> = Vec::new();
+        let mut remaining_letters = HashMap::<char, u8>::new();
+        let mut feedback = ['X'; 5];
 
         for (i, (g, s)) in guess.chars().zip(secret_word.chars()).enumerate() {
             if g == s {
                 feedback[i] = 'G';
-                if !self.correct[i] {
-                    reward += 0.1;
-                    self.correct[i] = true;
-                }
-            } else if secret_word.contains(g) {
+            } else {
+                remaining_letters
+                    .entry(s)
+                    .and_modify(|count| *count += 1)
+                    .or_insert(1);
+            }
+        }
+        for (i, g) in guess.chars().enumerate() {
+            if feedback[i] == 'X' && remaining_letters.get(&g).unwrap_or(&0) > &0 {
+                remaining_letters.entry(g).and_modify(|count| *count -= 1);
                 feedback[i] = 'Y';
             }
         }
 
-        (
-            format!(
-                "You guessed \"{}\" - your feedback is \"{}\"",
-                guess,
-                feedback.iter().collect::<String>()
-            ),
-            reward,
-        )
+        output.push("Your feedback is:\n".to_string());
+        for f in feedback {
+            output.push(format!("{} ", f));
+        }
+        output.push("\n".to_string());
+        for g in guess.chars() {
+            output.push(format!("{} ", g));
+        }
+        output.push("\n".to_string());
+
+        let mut reward = 0.0;
+        for (i, f) in feedback.iter().enumerate() {
+            if (f == &'Y' || f == &'G') && !self.got_yellow[i] {
+                self.got_yellow[i] = true;
+                reward += 0.05;
+            }
+            if f == &'G' && !self.got_green[i] {
+                self.got_green[i] = true;
+                reward += 0.05;
+            }
+        }
+
+        (output.join(""), reward)
     }
 }
 
@@ -85,14 +107,16 @@ impl EnvInstance for WordleInstance {
             rng,
             secret_word_index: 0,
             guesses: 0,
-            correct: [false; 5],
+            got_yellow: [false; 5],
+            got_green: [false; 5],
         }
     }
 
     fn reset(&mut self) -> String {
         self.guesses = 0;
         self.secret_word_index = self.rng.random_range(0..self.shared.words.len());
-        self.correct = [false; 5];
+        self.got_yellow = [false; 5];
+        self.got_green = [false; 5];
 
         "Make your first guess now".to_string()
     }
@@ -130,5 +154,5 @@ create_env_wrapper!(
     WordleEnv,
     WordleInstance,
     WordleSettings,
-    "Your job is to play wordle: Guess the 5-letter word in 6 tries. Feedback: G=Green (Correct), Y=Yellow (Wrong spot), -=Grey (Not in word). Your guess must be in all caps and the last word in your response."
+    "Your job is to play wordle: Guess the 5-letter word in 6 tries. Feedback: G = Green (Correct), Y = Yellow (Wrong spot), X = Grey (Not in word). Your guess must be in all caps and the last word in your response."
 );
