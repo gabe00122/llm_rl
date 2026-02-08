@@ -8,18 +8,23 @@ from llmrl.model.qwen3 import Qwen3
 
 
 def calculate_advantages(
-    rewards: jax.Array, values: jax.Array, discount: float, gae_lambda: float
+    rewards: jax.Array, values: jax.Array, discount: jax.Array, gae_lambda: jax.Array
 ) -> tuple[jax.Array, jax.Array]:
     def _body(acc, xs):
-        rewards, v_tp1 = xs
-        acc = rewards + discount * ((1 - gae_lambda) * v_tp1 + gae_lambda * acc)
+        rewards_t, value_tp1, discount_t, lambda_t = xs
+        acc = rewards_t + discount_t * ((1 - lambda_t) * value_tp1 + lambda_t * acc)
         return acc, acc
 
     # swap to time major
     _, targets = jax.lax.scan(
         _body,
         jnp.zeros((rewards.shape[0],), dtype=jnp.float32),
-        (jnp.swapaxes(rewards[:, 1:], 0, 1), jnp.swapaxes(values[:, 1:], 0, 1)),
+        (
+            jnp.swapaxes(rewards[:, 1:], 0, 1),
+            jnp.swapaxes(values[:, 1:], 0, 1),
+            jnp.swapaxes(discount, 0, 1),
+            jnp.swapaxes(gae_lambda, 0, 1),
+        ),
         reverse=True,
     )
     targets = jnp.swapaxes(targets, 0, 1)
@@ -126,8 +131,12 @@ def update_step(
 
     rollout = rollout._replace(policy_mask=policy_mask, values=values)
 
+    turn_boundries = ~rollout.policy_mask[:, :-1] & rollout.policy_mask[:, 1:]
+    gae_discount = jnp.where(turn_boundries, config.turn_discount, config.gae_discount)
+    gae_lambda = jnp.where(turn_boundries, config.turn_lambda, config.gae_lambda)
+
     advantages, targets = calculate_advantages(
-        jnp.asarray(rollout.rewards), values, config.gae_discount, config.gae_lambda
+        jnp.asarray(rollout.rewards), values, gae_discount, gae_lambda
     )
 
     wrt =  value_opt.wrt
