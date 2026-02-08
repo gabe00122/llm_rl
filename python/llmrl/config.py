@@ -122,7 +122,6 @@ class LossConfig(BaseModel):
     gae_discount: float
     turn_lambda: float
     turn_discount: float
-    vf_coef: float
     pg_clip_high: float
     pg_clip_low: float
 
